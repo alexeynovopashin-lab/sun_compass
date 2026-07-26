@@ -47,7 +47,8 @@ SunCompass/
 | `SUN_PHASES` | `enum SunPhase: CaseIterable` с `minAltitude`, `title`, `color` |
 | `PATH_COLOR_STOPS` | `struct PathStop` + `static let stops: [PathStop]` |
 | `altitudeToRadius` | `func radius(forAltitude:) -> CGFloat` — обе ветви режима внутри |
-| `proMode` в `localStorage` | `@AppStorage("proMode") var proMode = false` |
+| `hiddenMode` в `localStorage` | `@AppStorage("hiddenMode") var hiddenMode = false` |
+| `buildZones` + выдвижная легенда | `ZoneLegendView` в `.sheet(isPresented:)` с `.presentationDetents([.medium])` |
 | `buildSunPathSamples` | `SunPath.samples(lat:lon:on:) -> [SunSample]` |
 | `renderSunPath` | `Canvas { ctx, size in ... }` — рисуем `Path` по прогонам |
 | `findSolarPassage` | `SolarPassage.find(azimuth:lat:lon:from:) -> Date?`, выносится в `Task.detached` |
