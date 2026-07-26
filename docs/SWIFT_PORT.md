@@ -46,7 +46,8 @@ SunCompass/
 | `SunCalc.getTimes` | `SunCalc.times(date:lat:lon:) -> SunTimes` (структура вместо словаря) |
 | `SUN_PHASES` | `enum SunPhase: CaseIterable` с `minAltitude`, `title`, `color` |
 | `PATH_COLOR_STOPS` | `struct PathStop` + `static let stops: [PathStop]` |
-| `altitudeToRadius` | `func radius(forAltitude:) -> CGFloat` |
+| `altitudeToRadius` | `func radius(forAltitude:) -> CGFloat` — обе ветви режима внутри |
+| `proMode` в `localStorage` | `@AppStorage("proMode") var proMode = false` |
 | `buildSunPathSamples` | `SunPath.samples(lat:lon:on:) -> [SunSample]` |
 | `renderSunPath` | `Canvas { ctx, size in ... }` — рисуем `Path` по прогонам |
 | `findSolarPassage` | `SolarPassage.find(azimuth:lat:lon:from:) -> Date?`, выносится в `Task.detached` |
