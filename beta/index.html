@@ -1,0 +1,1459 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+    <title>Солнечный компас β</title>
+
+    <!-- PWA: манифест и иконки вынесены в отдельные файлы, офлайн обеспечивает sw.js -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#050505">
+    <meta name="description" content="Астрономический компас для фотографов: траектория солнца, золотой и синий час в вашей точке.">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Солнце β">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="icon" type="image/svg+xml" href="icon.svg">
+
+    <!-- SunCalc 2.0.1 (MIT) -->
+    <script>
+        (function () {
+            'use strict';
+            var PI = Math.PI, sin = Math.sin, cos = Math.cos, tan = Math.tan, asin = Math.asin, atan2 = Math.atan2;
+            var rad = PI / 180, dayMs = 1000 * 60 * 60 * 24, J1970 = 2440588, J2000 = 2451545;
+            function toJulian(date) { return date.valueOf() / dayMs - 0.5 + J1970; }
+            function fromJulian(j) { return new Date((j + 0.5 - J1970) * dayMs); }
+            function toDays(date) { return toJulian(date) - J2000; }
+            var e = rad * 23.4397;
+            function rightAscension(l, b) { return atan2(sin(l) * cos(e) - tan(b) * sin(e), cos(l)); }
+            function declination(l, b) { return asin(sin(b) * cos(e) + cos(b) * sin(e) * sin(l)); }
+            function azimuth(H, phi, dec) { return atan2(sin(H), cos(H) * sin(phi) - tan(dec) * cos(phi)); }
+            function altitude(H, phi, dec) { return asin(sin(phi) * sin(dec) + cos(phi) * cos(dec) * cos(H)); }
+            function siderealTime(d, lw) { return rad * (280.16 + 360.9856235 * d) - lw; }
+            function astroRefraction(h) { if (h < 0) h = 0; return 0.0002967 / tan(h + 0.00312536 / (h + 0.08901179)); }
+            function solarMeanAnomaly(d) { return rad * (357.5291 + 0.98560028 * d); }
+            function eclipticLongitude(M) { var C = rad * (1.9148 * sin(M) + 0.02 * sin(2 * M) + 0.0003 * sin(3 * M)), P = rad * 102.9372; return M + C + P + PI; }
+            function sunCoords(d) { var M = solarMeanAnomaly(d), L = eclipticLongitude(M); return { dec: declination(L, 0), ra: rightAscension(L, 0) }; }
+            var SunCalc = {};
+            SunCalc.getPosition = function (date, lat, lng) {
+                var lw = rad * -lng, phi = rad * lat, d = toDays(date), c = sunCoords(d), H = siderealTime(d, lw) - c.ra;
+                return { azimuth: azimuth(H, phi, c.dec), altitude: altitude(H, phi, c.dec) };
+            };
+            var times = [[-0.833, 'sunrise', 'sunset'], [-0.3, 'sunriseEnd', 'sunsetStart'], [-6, 'dawn', 'dusk'], [-12, 'nauticalDawn', 'nauticalDusk'], [-18, 'nightEnd', 'night'], [6, 'goldenHourEnd', 'goldenHour']];
+            SunCalc.addTime = function (angle, riseName, setName) { times.push([angle, riseName, setName]); };
+            var J0 = 0.0009;
+            function julianCycle(d, lw) { return Math.round(d - J0 - lw / (2 * PI)); }
+            function approxTransit(Ht, lw, n) { return J0 + (Ht + lw) / (2 * PI) + n; }
+            function solarTransitJ(ds, M, L) { return J2000 + ds + 0.0053 * sin(M) - 0.0069 * sin(2 * L); }
+            function hourAngle(h, phi, d) { return Math.acos((sin(h) - sin(phi) * sin(d)) / (cos(phi) * cos(d))); }
+            function getSetJ(h, lw, phi, dec, n, M, L) { var w = hourAngle(h, phi, dec), a = approxTransit(w, lw, n); return solarTransitJ(a, M, L); }
+            SunCalc.getTimes = function (date, lat, lng) {
+                var lw = rad * -lng, phi = rad * lat, d = toDays(date), n = julianCycle(d, lw), ds = approxTransit(0, lw, n),
+                    M = solarMeanAnomaly(ds), L = eclipticLongitude(M), dec = declination(L, 0), Jnoon = solarTransitJ(ds, M, L),
+                    i, len, time, Jset, Jrise, result = { solarNoon: fromJulian(Jnoon), nadir: fromJulian(Jnoon - 0.5) };
+                for (i = 0, len = times.length; i < len; i += 1) {
+                    time = times[i]; Jset = getSetJ(time[0] * rad, lw, phi, dec, n, M, L); Jrise = Jnoon - (Jset - Jnoon);
+                    result[time[1]] = fromJulian(Jrise); result[time[2]] = fromJulian(Jset);
+                }
+                return result;
+            };
+            window.SunCalc = SunCalc;
+        }());
+    </script>
+
+    <style>
+        :root {
+            --bg: #050505;
+            --text-primary: #ffffff;
+            --text-secondary: rgba(255, 255, 255, 0.45);
+            --accent-sun: #ffd25f;
+            --accent-glow: rgba(255, 210, 95, 0.4);
+            --surface: rgba(255, 255, 255, 0.08);
+            --surface-border: rgba(255, 255, 255, 0.15);
+            /* Компас ужимается на низких экранах (iPhone SE), но не растёт выше 340 */
+            /* 48px — горизонтальные отступы body, иначе буквы N/E/S/W срезает краем экрана */
+            --compass-size: min(340px, calc(100vw - 48px), 46dvh);
+            --zoom-scale: 2;
+            --btn-size: 72px;
+
+            /* Палитра фаз — единственный источник правды для кольца и подписей.
+               Дублируется в JS (SUN_PHASES) — при правке менять оба места. */
+            --phase-day: rgba(255, 255, 255, 0.55);
+            --phase-golden: #ffd25f;
+            --phase-sunset: #ff6b35;
+            --phase-blue: #4d7fd6;
+            --phase-twilight: #2a3f7a;
+            --phase-night: rgba(255, 255, 255, 0.3);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
+            height: 100dvh;
+            width: 100vw;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            padding: calc(env(safe-area-inset-top) + 20px) 24px calc(env(safe-area-inset-bottom) + 32px);
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+
+        body::before {
+            content: "";
+            position: absolute;
+            width: 420px;
+            height: 420px;
+            background: radial-gradient(circle, rgba(255, 210, 95, 0.05) 0%, rgba(0,0,0,0) 70%);
+            top: 45%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .start-overlay {
+            position: fixed;
+            inset: 0;
+            background: var(--bg);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.5s ease;
+        }
+        .start-overlay.hidden { opacity: 0; pointer-events: none; }
+
+        .start-btn {
+            background: var(--surface);
+            border: 1px solid var(--surface-border);
+            color: var(--text-primary);
+            padding: 18px 42px;
+            border-radius: 100px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: transform 0.2s, background 0.2s;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+        .start-btn:active { transform: scale(0.95); background: rgba(255, 255, 255, 0.18); }
+
+        .display-header {
+            position: relative;
+            z-index: 1;
+            text-align: center;
+            margin-top: 10px;
+            min-height: 110px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+            transform-origin: center top;
+        }
+
+        /* Крупное масштабирование часов в zoom-режиме (под референс big_clock.png) */
+        body.zoomed .display-header {
+            transform: scale(1.6) translateY(6px);
+        }
+
+        .date-label {
+            font-size: 17px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            letter-spacing: -0.2px;
+            min-height: 24px;
+        }
+
+        .clock {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            font-size: 72px;
+            font-weight: 200;
+            font-variant-numeric: tabular-nums;
+            font-feature-settings: "tnum";
+            letter-spacing: -1px;
+            height: 72px;
+            margin-top: 4px;
+            color: var(--text-primary);
+            width: 100%;
+            max-width: 340px;
+            overflow: hidden;
+        }
+
+        .clock::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 25%;
+            z-index: 10;
+            pointer-events: none;
+            background: linear-gradient(to bottom, var(--bg) 0%, rgba(5,5,5,0.85) 45%, transparent 100%);
+        }
+
+        .clock::after {
+            content: "";
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 20%;
+            z-index: 10;
+            pointer-events: none;
+            background: linear-gradient(to top, var(--bg) 0%, transparent 100%);
+        }
+
+        .digit {
+            position: relative;
+            width: 0.62em;
+            height: 1em;
+            overflow: hidden;
+            -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 20%, black 80%, transparent 100%);
+            mask-image: linear-gradient(to bottom, transparent 0%, black 20%, black 80%, transparent 100%);
+        }
+
+        .wheel {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            will-change: transform;
+        }
+
+        .wheel div {
+            height: 1em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .separator {
+            width: 0.25em;
+            text-align: center;
+            color: var(--text-primary);
+            font-weight: 200;
+            line-height: 1;
+            transform: translateY(-2px);
+        }
+
+        .compass-viewport {
+            position: relative;
+            z-index: 1;
+            width: var(--compass-size);
+            height: var(--compass-size);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: transform 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+            transform-origin: center center;
+            margin-bottom: 0;
+            touch-action: manipulation;
+        }
+
+        /* Точный точечный сдвиг центра компаса под кнопку спуска */
+        body.zoomed .compass-viewport {
+            transform: translateY(var(--zoom-offset, 0px)) scale(var(--zoom-scale));
+        }
+
+        .viewport-notch {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 2px;
+            height: 10px;
+            background: var(--accent-sun);
+            z-index: 5;
+            box-shadow: 0 0 8px var(--accent-sun);
+        }
+
+        .compass-svg {
+            width: 100%;
+            height: 100%;
+            will-change: transform;
+        }
+
+        .center-dot {
+            position: absolute;
+            width: 6px;
+            height: 6px;
+            background: var(--text-primary);
+            border-radius: 50%;
+            z-index: 4;
+            box-shadow: 0 0 8px rgba(255,255,255,0.8);
+        }
+
+        .footer-meta {
+            position: relative;
+            z-index: 10; /* Держим кнопку поверх увеличенного компаса */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+            width: 100%;
+        }
+
+        .shutter-btn {
+            width: var(--btn-size);
+            height: var(--btn-size);
+            border-radius: 50%;
+            border: 3px solid rgba(255, 255, 255, 0.85);
+            background: transparent;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            outline: none;
+            -webkit-tap-highlight-color: transparent;
+            transition: border-color 0.3s ease, transform 0.15s ease;
+            touch-action: manipulation;
+        }
+        .shutter-btn:active { transform: scale(0.93); }
+
+        .shutter-inner {
+            width: 58px;
+            height: 58px;
+            border-radius: 50%;
+            background: #ffffff;
+            transition: transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275), 
+                        background-color 0.25s ease, 
+                        border-radius 0.25s ease,
+                        box-shadow 0.25s ease;
+        }
+
+        .shutter-btn.active { border-color: var(--accent-sun); }
+        .shutter-btn.active .shutter-inner {
+            background: var(--accent-sun);
+            box-shadow: 0 0 20px var(--accent-glow);
+            transform: scale(0.72);
+            border-radius: 14px;
+        }
+
+        /* Зафиксированный замер: деления приглушаются, чтобы читались траектория и мишень */
+        .compass-viewport.locked #ticksGroup { opacity: 0.45; }
+        .compass-viewport.locked #lettersGroup { opacity: 0.7; }
+        #ticksGroup, #lettersGroup { transition: opacity 0.35s ease; }
+
+        .location-name {
+            font-size: 13px;
+            font-weight: 400;
+            color: var(--text-secondary);
+            letter-spacing: 0.2px;
+        }
+
+        /* Строка состояния: восход · текущая фаза · заход */
+        .sun-status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            font-size: 12px;
+            font-weight: 500;
+            letter-spacing: 0.2px;
+            color: var(--text-secondary);
+            min-height: 16px;
+            font-variant-numeric: tabular-nums;
+        }
+        .sun-status .phase-now { color: var(--phase-day); transition: color 0.6s ease; }
+        .sun-status .sep { opacity: 0.3; }
+        /* В zoom-режиме подвал не должен спорить с увеличенным компасом */
+        body.zoomed .location-name,
+        body.zoomed .sun-status { opacity: 0.35; transition: opacity 0.4s ease; }
+
+        .build-number {
+            position: absolute;
+            bottom: calc(env(safe-area-inset-bottom) + 6px);
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.15);
+            font-weight: 500;
+            letter-spacing: 0.5px;
+            pointer-events: none;
+        }
+
+        .onboarding-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.85);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            z-index: 200;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.5s ease;
+        }
+        .onboarding-overlay.hidden { opacity: 0; pointer-events: none; }
+        .onboarding-card {
+            background: var(--bg);
+            color: var(--text-primary);
+            padding: 32px 28px;
+            border-radius: 28px;
+            text-align: center;
+            max-width: 280px;
+            font-size: 16px;
+            line-height: 1.5;
+        }
+        .onboarding-card p { margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+
+    <div class="onboarding-overlay" id="onboardingOverlay">
+        <div class="onboarding-card">
+            <p>Направьте телефон в интересующую сторону<br><span style="font-size:13px;color:var(--text-secondary);">(держите горизонтально, экраном вверх)</span></p>
+            <p>Нажмите кнопку — узнаете, когда там будет солнце</p>
+            <button class="start-btn" id="onboardingBtn">Понятно</button>
+        </div>
+    </div>
+
+    <div class="start-overlay" id="startOverlay">
+        <button class="start-btn" id="startBtn">Включить компас</button>
+    </div>
+
+    <div class="display-header">
+        <div class="date-label" id="dateLabel"></div>
+        <div class="clock" id="clock">
+            <div class="digit"><div class="wheel"></div></div>
+            <div class="digit"><div class="wheel"></div></div>
+            <div class="separator">:</div>
+            <div class="digit"><div class="wheel"></div></div>
+            <div class="digit"><div class="wheel"></div></div>
+        </div>
+    </div>
+
+    <div class="compass-viewport" id="compassViewport">
+        <div class="viewport-notch"></div>
+        <div class="center-dot"></div>
+        
+        <svg class="compass-svg" id="compassSvg" viewBox="0 0 340 340">
+            <circle cx="170" cy="170" r="160" stroke="rgba(255,255,255,0.08)" stroke-width="1" fill="none"/>
+            <!-- Пунктирная окружность r=115 — линия горизонта (высота солнца 0°) -->
+            <circle cx="170" cy="170" r="115" stroke="rgba(255,255,255,0.13)" stroke-width="1" stroke-dasharray="2 4" fill="none"/>
+
+            <!-- Траектория солнца «сегодня»: угол = азимут, радиус = высота над горизонтом -->
+            <g id="sunPathGroup"></g>
+            <!-- Засечки восхода и захода на линии горизонта -->
+            <g id="horizonMarksGroup"></g>
+
+            <g id="ticksGroup"></g>
+            <g id="lettersGroup"></g>
+
+            <line id="shootLine" x1="170" y1="170" x2="170" y2="170" stroke="#ffd25f" stroke-width="1.5" stroke-dasharray="1 6" opacity="0"/>
+            
+            <circle id="currentSunDot" cx="170" cy="50" r="5" fill="#ffffff" filter="drop-shadow(0 0 6px rgba(255,255,255,0.9))" style="display: none;" />
+            <circle id="animatingSunDot" cx="170" cy="50" r="5" fill="#ffffff" filter="drop-shadow(0 0 8px rgba(255,255,255,1))" style="display: none;" />
+            <circle id="targetSunDot" cx="170" cy="10" r="7" fill="#ffd25f" filter="drop-shadow(0 0 10px #ffd25f)" style="display: none; transition: r 0.15s ease;" />
+        </svg>
+    </div>
+
+    <div class="footer-meta">
+        <button class="shutter-btn" id="calcBtn" aria-label="Сделать замер">
+            <div class="shutter-inner"></div>
+        </button>
+        <div class="location-name" id="locationLabel">Определение...</div>
+        <div class="sun-status" id="sunStatus"></div>
+    </div>
+
+    <div class="build-number" id="buildNumber"></div>
+
+    <script>
+        // ==================== Версия приложения ====================
+        // Единственный источник правды о версии. Меняется вручную при релизе
+        // и должен совпадать с CACHE_NAME в sw.js и заголовком в docs/CHANGELOG.md.
+        const APP_VERSION = '2.0.0-beta';
+        document.getElementById('buildNumber').textContent = `v${APP_VERSION}`;
+
+        // Ручная микроподстройка смещения при необходимости (в пикселях)
+        const ZOOM_FINE_TUNE = 0; 
+
+        // ==================== Безопасное хранилище ====================
+        const memoryStorage = {};
+        const safeStorage = (() => {
+            try {
+                const testKey = '__storage_test__';
+                localStorage.setItem(testKey, '1');
+                localStorage.removeItem(testKey);
+                return localStorage;
+            } catch (e) {
+                return {
+                    getItem(key) { return memoryStorage[key] || null; },
+                    setItem(key, value) { memoryStorage[key] = value; }
+                };
+            }
+        })();
+
+        // ==================== DOM-элементы ====================
+        const ticksGroup = document.getElementById('ticksGroup');
+        const lettersGroup = document.getElementById('lettersGroup');
+        const cx = 170, cy = 170;
+        const r1 = 160;
+        const r2_major = r1 - 12;
+        const r2_minor = r1 - 6;
+
+        for (let i = 0; i < 360; i += 5) {
+            const mod = i % 90;
+            if (mod <= 5 || mod >= 85) continue;
+
+            const isMajor = i % 30 === 0;
+            const r2 = isMajor ? r2_major : r2_minor;
+            const rad = (i - 90) * Math.PI / 180;
+            
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('x1', cx + r1 * Math.cos(rad));
+            line.setAttribute('y1', cy + r1 * Math.sin(rad));
+            line.setAttribute('x2', cx + r2 * Math.cos(rad));
+            line.setAttribute('y2', cy + r2 * Math.sin(rad));
+            line.setAttribute('stroke', isMajor ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.1)');
+            line.setAttribute('stroke-width', isMajor ? '1.5' : '1');
+            ticksGroup.appendChild(line);
+        }
+
+        const LETTER_OFFSET = 154; 
+        const directions = [
+            { label: 'N', angle: 0,   fill: '#ffd25f', weight: '600', fontSize: '18', rotate: 0 },
+            { label: 'E', angle: 90,  fill: 'rgba(255,255,255,0.4)', weight: '500', fontSize: '14', rotate: 90 },
+            { label: 'S', angle: 180, fill: 'rgba(255,255,255,0.4)', weight: '500', fontSize: '14', rotate: 180 },
+            { label: 'W', angle: 270, fill: 'rgba(255,255,255,0.4)', weight: '500', fontSize: '14', rotate: -90 }
+        ];
+
+        directions.forEach(dir => {
+            const rad = (dir.angle - 90) * Math.PI / 180;
+            const x = 170 + LETTER_OFFSET * Math.cos(rad);
+            const y = 170 + LETTER_OFFSET * Math.sin(rad);
+            
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('x', x);
+            text.setAttribute('y', y); 
+            text.setAttribute('fill', dir.fill);
+            text.setAttribute('font-size', dir.fontSize);
+            text.setAttribute('font-weight', dir.weight);
+            text.setAttribute('text-anchor', 'middle');
+            text.setAttribute('dominant-baseline', 'central');
+            text.setAttribute('transform', `rotate(${dir.rotate}, ${x}, ${y})`);
+            text.textContent = dir.label;
+            lettersGroup.appendChild(text);
+        });
+
+        const dateLabel = document.getElementById('dateLabel');
+        const clockEl = document.getElementById('clock');
+        const locationLabel = document.getElementById('locationLabel');
+        const sunStatus = document.getElementById('sunStatus');
+        const sunPathGroup = document.getElementById('sunPathGroup');
+        const horizonMarksGroup = document.getElementById('horizonMarksGroup');
+        const compassSvg = document.getElementById('compassSvg');
+        const compassViewport = document.getElementById('compassViewport');
+        const currentSunDot = document.getElementById('currentSunDot');
+        const animatingSunDot = document.getElementById('animatingSunDot');
+        const targetSunDot = document.getElementById('targetSunDot');
+        const shootLine = document.getElementById('shootLine');
+        const calcBtn = document.getElementById('calcBtn');
+        const startOverlay = document.getElementById('startOverlay');
+        const startBtn = document.getElementById('startBtn');
+        const onboardingOverlay = document.getElementById('onboardingOverlay');
+        const onboardingBtn = document.getElementById('onboardingBtn');
+
+        // ==================== Машина состояний ====================
+        const STATE = { IDLE: 'idle', PERMISSION: 'permission', READY: 'ready', CALCULATING: 'calculating', LOCKED: 'locked' };
+        let appState = STATE.IDLE;
+        let isZoomed = false; // Zoom как независимый флаг
+        let chaosTimers = [];
+
+        function setAppState(newState) {
+            appState = newState;
+        }
+
+        // ==================== Переменные ====================
+        let userLat = null;
+        let userLon = null;
+        let realHeading = 0;
+        let visualHeading = 0;
+        let currentSunAzimuth = 0;
+        let targetAzimuth = null;
+        let animationFrameId = null;
+        let clockTimeoutId = null;
+        let sunUpdateIntervalId = null;
+        let stabilizationTimer = null;
+        let storyWatchdogId = null;
+
+        // Тайминги ролика «выстрел мишени → солнце доезжает до цели»
+        const STORY_SHOOT_MS = 350;
+        const STORY_TRAVEL_MS = 700;
+        const STORY_TOTAL_MS = STORY_SHOOT_MS + STORY_TRAVEL_MS;
+
+        const headingHistory = [];
+        function recordHeading(heading) {
+            const now = performance.now();
+            headingHistory.push({ value: heading, time: now });
+            while (headingHistory.length > 0 && now - headingHistory[0].time > 500) {
+                headingHistory.shift();
+            }
+        }
+
+        // Разброс углов считаем циклически относительно первого замера, иначе колебания
+        // около севера (359.8° / 0.2°) дают размах 359° и компас «никогда не стабилен».
+        function isHeadingStable() {
+            if (headingHistory.length < 5) return false;
+            const base = headingHistory[0].value;
+            let min = 0, max = 0;
+            for (const h of headingHistory) {
+                const d = ((h.value - base + 540) % 360) - 180;
+                if (d < min) min = d;
+                if (d > max) max = d;
+            }
+            return (max - min) < 5;
+        }
+
+        // ==================== Компас ====================
+        function normalizeAngle(angle) {
+            return ((angle % 360) + 360) % 360;
+        }
+
+        function smoothAngle(target, current) {
+            let diff = target - current;
+            while (diff > 180) diff -= 360;
+            while (diff < -180) diff += 360;
+            return current + diff * 0.15;
+        }
+
+        function renderCompass() {
+            if (appState !== STATE.LOCKED) {
+                visualHeading = smoothAngle(realHeading, visualHeading);
+                compassSvg.style.transform = `rotate(${-visualHeading}deg)`;
+            }
+            requestAnimationFrame(renderCompass);
+        }
+        renderCompass();
+
+        // ==================== ОДОМЕТР ====================
+        const wheels = [...document.querySelectorAll(".wheel")];
+        const TOTAL_SECTIONS = 100;
+        let previousDigits = [0, 0, 0, 0];
+        let rotations = [0, 0, 0, 0];
+        let isClockInitialized = false;
+
+        const cascadeDelay = [0, 80, 160, 240];
+
+        wheels.forEach((w) => {
+            w.innerHTML = '';
+            for (let i = 0; i < TOTAL_SECTIONS * 10; i++) {
+                const d = document.createElement("div");
+                d.textContent = i % 10;
+                w.appendChild(d);
+            }
+        });
+
+        function setClockTime(timeStr, forceImmediate = false) {
+            const digits = timeStr.replace(":", "").split("").map(Number);
+            if (digits.length !== 4) return;
+
+            digits.forEach((target, index) => {
+                const wheel = wheels[index];
+                const current = previousDigits[index];
+
+                if (!isClockInitialized || forceImmediate) {
+                    rotations[index] = (TOTAL_SECTIONS / 2) * 10 + target;
+                    wheel.style.transition = 'none';
+                    wheel.style.transform = `translateY(${-rotations[index]}em)`;
+                    previousDigits[index] = target;
+                    requestAnimationFrame(() => { wheel.style.transition = ''; });
+                    return;
+                }
+
+                if (target === current) return;
+
+                let diff = target - current;
+                if (diff < 0) diff += 10;
+
+                rotations[index] += diff;
+
+                const duration = 0.45 + diff * 0.12;
+                wheel.style.transition = `transform ${duration}s cubic-bezier(0.25, 0.8, 0.25, 1)`;
+                wheel.style.transitionDelay = `${cascadeDelay[index]}ms`;
+                wheel.style.transform = `translateY(${-rotations[index]}em)`;
+
+                previousDigits[index] = target;
+
+                const mid = (TOTAL_SECTIONS / 2) * 10;
+                if (Math.abs(rotations[index] - mid) > (TOTAL_SECTIONS/2 - 5) * 10) {
+                    const resetTime = duration * 1000 + cascadeDelay[index] + 50;
+                    setTimeout(() => {
+                        rotations[index] = (TOTAL_SECTIONS / 2) * 10 + target;
+                        wheel.style.transition = 'none';
+                        wheel.style.transform = `translateY(${-rotations[index]}em)`;
+                        requestAnimationFrame(() => { wheel.style.transition = ''; });
+                    }, resetTime);
+                }
+            });
+
+            isClockInitialized = true;
+        }
+
+        function syncClockToNextMinute() {
+            if (appState === STATE.READY) {
+                const now = new Date();
+                const timeStr = now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+                setClockTime(timeStr);
+            }
+            const nowMs = new Date();
+            const msToNextMinute = 60000 - (nowMs.getSeconds() * 1000 + nowMs.getMilliseconds());
+            clockTimeoutId = setTimeout(syncClockToNextMinute, msToNextMinute);
+        }
+
+        function startChaosClock() {
+            stopChaosClock();
+            wheels.forEach((wheel, index) => {
+                const speed = 60 + Math.random() * 80;
+                wheel.style.transition = `transform ${speed}ms linear`;
+                
+                const t = setInterval(() => {
+                    const step = Math.floor(Math.random() * 3) + 1;
+                    rotations[index] += step;
+                    wheel.style.transform = `translateY(${-rotations[index]}em)`;
+                    
+                    if (rotations[index] > (TOTAL_SECTIONS - 2) * 10) {
+                        rotations[index] = (TOTAL_SECTIONS / 2) * 10 + (rotations[index] % 10);
+                        wheel.style.transition = 'none';
+                        wheel.style.transform = `translateY(${-rotations[index]}em)`;
+                        void wheel.offsetWidth;
+                        wheel.style.transition = `transform ${speed}ms linear`;
+                    }
+                }, speed);
+                chaosTimers.push(t);
+            });
+        }
+
+        function stopChaosClock() {
+            chaosTimers.forEach(t => clearInterval(t));
+            chaosTimers = [];
+            wheels.forEach((wheel, index) => {
+                previousDigits[index] = Math.floor(rotations[index]) % 10;
+            });
+        }
+
+        // ==================== Логика Zoom-режима ====================
+        function calculateZoomOffset() {
+            const compassRect = compassViewport.getBoundingClientRect();
+            const buttonRect = calcBtn.getBoundingClientRect();
+            
+            // Расстояние между центром компаса и центром кнопки спуска
+            const compassCenterY = compassRect.top + compassRect.height / 2;
+            const buttonCenterY = buttonRect.top + buttonRect.height / 2;
+            
+            return (buttonCenterY - compassCenterY) + ZOOM_FINE_TUNE;
+        }
+
+        function enterZoomMode() {
+            if (isZoomed) return;
+            const offset = calculateZoomOffset();
+            document.body.style.setProperty('--zoom-offset', offset + 'px');
+            isZoomed = true;
+            document.body.classList.add('zoomed');
+        }
+
+        function exitZoomMode() {
+            if (!isZoomed) return;
+            isZoomed = false;
+            document.body.classList.remove('zoomed');
+            document.body.style.removeProperty('--zoom-offset');
+        }
+
+        function toggleZoomMode() {
+            if (isZoomed) exitZoomMode();
+            else enterZoomMode();
+        }
+
+        // Детектор тапов: одиночный — замер/сброс, тройной — zoom.
+        // Счётчик у каждой цели свой, чтобы тап по компасу и тап по кнопке не складывались.
+        const TAP_WINDOW_MS = 300;
+
+        function makeTapHandler() {
+            let count = 0;
+            let timer = null;
+            return function () {
+                count++;
+                clearTimeout(timer);
+
+                if (count === 3) {
+                    count = 0;
+                    toggleZoomMode();
+                    return;
+                }
+
+                timer = setTimeout(() => {
+                    if (count === 1) toggleLock();
+                    count = 0;
+                }, TAP_WINDOW_MS);
+            };
+        }
+
+        const handleCompassTap = makeTapHandler();
+        const handleShutterTap = makeTapHandler();
+
+        // Обновление смещения при смене ориентации экрана
+        window.addEventListener('resize', () => {
+            if (isZoomed) {
+                document.body.classList.remove('zoomed');
+                const offset = calculateZoomOffset();
+                document.body.style.setProperty('--zoom-offset', offset + 'px');
+                document.body.classList.add('zoomed');
+            }
+        });
+
+        // ==================== Астрономия ====================
+        function getSolarPosition(date, lat, lon) {
+            if (lat === null || lon === null || !window.SunCalc) return { azimuth: 0, altitude: -90 };
+            const pos = window.SunCalc.getPosition(date, lat, lon);
+            let azimuth = (pos.azimuth * 180 / Math.PI + 180) % 360;
+            return { azimuth, altitude: pos.altitude * 180 / Math.PI };
+        }
+
+        function unwrapAzimuth(az, base) {
+            let res = az;
+            while (res - base > 180) res -= 360;
+            while (res - base < -180) res += 360;
+            return res;
+        }
+
+        const SVG_NS = 'http://www.w3.org/2000/svg';
+
+        function polar(azimuth, radius) {
+            const rad = (azimuth - 90) * Math.PI / 180;
+            return { x: 170 + radius * Math.cos(rad), y: 170 + radius * Math.sin(rad) };
+        }
+
+        function setSvgDotPosition(dotElement, azimuth, radius) {
+            const p = polar(azimuth, radius);
+            dotElement.setAttribute('cx', p.x);
+            dotElement.setAttribute('cy', p.y);
+        }
+
+        // ==================== Фазы освещения ====================
+        // Единственный источник правды: пороги высоты солнца используются и подписью
+        // результата, и строкой состояния. Порядок — строго по убыванию minAlt.
+        const SUN_PHASES = [
+            { minAlt: 6,         name: 'День',           css: 'var(--phase-day)' },
+            { minAlt: 0,         name: 'Золотой час',    css: 'var(--phase-golden)' },
+            { minAlt: -0.833,    name: 'Закат',          nameMorning: 'Восход', css: 'var(--phase-sunset)' },
+            { minAlt: -6,        name: 'Синий час',      css: 'var(--phase-blue)' },
+            { minAlt: -12,       name: 'Навиг. сумерки', css: 'var(--phase-twilight)' },
+            { minAlt: -18,       name: 'Астр. сумерки',  css: 'var(--phase-twilight)' },
+            { minAlt: -Infinity, name: 'Ночь',           css: 'var(--phase-night)' }
+        ];
+
+        function phaseFor(altitude, isMorning) {
+            for (const p of SUN_PHASES) {
+                if (altitude >= p.minAlt) {
+                    return { name: (isMorning && p.nameMorning) ? p.nameMorning : p.name, css: p.css };
+                }
+            }
+            return SUN_PHASES[SUN_PHASES.length - 1];
+        }
+
+        // ==================== Траектория солнца «сегодня» ====================
+        // Полярная проекция: угол = азимут, радиус = зенитное расстояние.
+        // Горизонт (0°) ложится ровно на пунктирную окружность r=115,
+        // зенит стянут в центр, сумерки уходят наружу — но не дальше делений.
+        const HORIZON_R    = 115;
+        const PATH_MIN_ALT = -18;                                  // глубже астрономических сумерек не рисуем
+        const PATH_MAX_R   = HORIZON_R * (1 - PATH_MIN_ALT / 90);  // ≈138, деления начинаются с 148
+        const PATH_MIN_R   = 10;
+        const PATH_STEP_MS = 2 * 60 * 1000;                        // шаг выборки: 2 минуты ≈ 1 px дуги
+
+        function altitudeToRadius(altitude) {
+            const r = HORIZON_R * (1 - altitude / 90);
+            return Math.max(PATH_MIN_R, Math.min(PATH_MAX_R, r));
+        }
+
+        // Опорные точки градиента вдоль траектории (по убыванию высоты).
+        // w — толщина линии: день проходит тонкой нитью, съёмочные часы у горизонта
+        // (золотой час, закат, синий час) утолщаются и выходят на первый план.
+        const PATH_COLOR_STOPS = [
+            { alt: 60,     rgb: [255, 255, 255], a: 0.26, w: 2.2 },
+            { alt: 12,     rgb: [255, 255, 255], a: 0.32, w: 2.4 },
+            { alt: 6,      rgb: [255, 236, 190], a: 0.60, w: 3.2 },
+            { alt: 2,      rgb: [255, 210, 95],  a: 0.95, w: 4.2 },
+            { alt: 0,      rgb: [255, 154, 60],  a: 1.00, w: 4.6 },
+            { alt: -0.833, rgb: [255, 107, 53],  a: 1.00, w: 4.6 },
+            { alt: -3,     rgb: [150, 110, 170], a: 0.90, w: 4.2 },
+            { alt: -6,     rgb: [77, 127, 214],  a: 0.85, w: 4.0 },
+            { alt: -12,    rgb: [42, 63, 122],   a: 0.55, w: 3.0 },
+            { alt: -18,    rgb: [27, 38, 80],    a: 0.30, w: 2.2 }
+        ];
+
+        function pathColorAt(altitude) {
+            const stops = PATH_COLOR_STOPS;
+            if (altitude >= stops[0].alt) return stops[0];
+            const last = stops[stops.length - 1];
+            if (altitude <= last.alt) return last;
+            for (let i = 0; i < stops.length - 1; i++) {
+                const hi = stops[i], lo = stops[i + 1];
+                if (altitude <= hi.alt && altitude >= lo.alt) {
+                    const k = (altitude - lo.alt) / (hi.alt - lo.alt);
+                    return {
+                        rgb: [0, 1, 2].map(j => Math.round(lo.rgb[j] + (hi.rgb[j] - lo.rgb[j]) * k)),
+                        a: lo.a + (hi.a - lo.a) * k,
+                        w: lo.w + (hi.w - lo.w) * k
+                    };
+                }
+            }
+            return last;
+        }
+
+        let sunPathSamples = [];
+        let sunPathKey = null;
+        let currentSunAltitude = 0;
+
+        function sunPathKeyFor(date, lat, lon) {
+            return `${date.toDateString()}|${lat.toFixed(3)}|${lon.toFixed(3)}`;
+        }
+
+        // Сутки берём от локальной полуночи до следующей полуночи —
+        // так выборка остаётся корректной в дни перевода часов (23 или 25 часов).
+        function buildSunPathSamples(lat, lon, now) {
+            const start = new Date(now); start.setHours(0, 0, 0, 0);
+            const end = new Date(start); end.setDate(end.getDate() + 1);
+            const probe = new Date();
+            const samples = [];
+            for (let t = start.getTime(); t <= end.getTime(); t += PATH_STEP_MS) {
+                probe.setTime(t);
+                const pos = getSolarPosition(probe, lat, lon);
+                samples.push({ t, az: pos.azimuth, alt: pos.altitude });
+            }
+            return samples;
+        }
+
+        function renderSunPath(now) {
+            sunPathGroup.textContent = '';
+            horizonMarksGroup.textContent = '';
+            if (!sunPathSamples.length) return;
+
+            const nowT = now.getTime();
+            const COLOR_DELTA = 12; // суммарная разница RGB, после которой начинаем новый сегмент
+            let run = null;
+
+            const flush = () => {
+                if (run && run.pts.length >= 2) {
+                    const p = document.createElementNS(SVG_NS, 'path');
+                    p.setAttribute('d', 'M' + run.pts.join(' L'));
+                    p.setAttribute('fill', 'none');
+                    p.setAttribute('stroke', `rgb(${run.rgb.join(',')})`);
+                    // Пройденная часть суток тоньше и приглушённее — но остаётся читаемой
+                    p.setAttribute('stroke-opacity', (run.a * (run.past ? 0.45 : 1)).toFixed(3));
+                    p.setAttribute('stroke-width', (run.w * (run.past ? 0.6 : 1)).toFixed(2));
+                    p.setAttribute('stroke-linecap', 'round');
+                    p.setAttribute('stroke-linejoin', 'round');
+                    sunPathGroup.appendChild(p);
+                }
+                run = null;
+            };
+
+            for (const s of sunPathSamples) {
+                if (s.alt < PATH_MIN_ALT) { flush(); continue; }
+
+                const c = pathColorAt(s.alt);
+                const past = s.t < nowT;
+                const pt = polar(s.az, altitudeToRadius(s.alt));
+                const xy = `${pt.x.toFixed(1)},${pt.y.toFixed(1)}`;
+
+                if (run) {
+                    const delta = Math.abs(run.rgb[0] - c.rgb[0])
+                                + Math.abs(run.rgb[1] - c.rgb[1])
+                                + Math.abs(run.rgb[2] - c.rgb[2]);
+                    if (past !== run.past || delta > COLOR_DELTA) {
+                        run.pts.push(xy); // общая точка со следующим сегментом — стык без разрыва
+                        flush();
+                    }
+                }
+                if (!run) run = { rgb: c.rgb, a: c.a, w: c.w, past, pts: [] };
+                run.pts.push(xy);
+            }
+            flush();
+
+            renderHorizonMarks(now);
+        }
+
+        // Засечки восхода и захода поперёк линии горизонта.
+        function renderHorizonMarks(now) {
+            const times = window.SunCalc.getTimes(now, userLat, userLon);
+            [['sunrise', '255,154,60'], ['sunset', '255,107,53']].forEach(([key, rgb]) => {
+                const d = times[key];
+                if (!d || Number.isNaN(d.getTime())) return; // полярный день или полярная ночь
+                const az = getSolarPosition(d, userLat, userLon).azimuth;
+                const a = polar(az, HORIZON_R - 9);
+                const b = polar(az, HORIZON_R + 9);
+                const line = document.createElementNS(SVG_NS, 'line');
+                line.setAttribute('x1', a.x); line.setAttribute('y1', a.y);
+                line.setAttribute('x2', b.x); line.setAttribute('y2', b.y);
+                line.setAttribute('stroke', `rgba(${rgb},0.75)`);
+                line.setAttribute('stroke-width', '1.5');
+                line.setAttribute('stroke-linecap', 'round');
+                horizonMarksGroup.appendChild(line);
+            });
+        }
+
+        function formatClock(date) {
+            if (!date || Number.isNaN(date.getTime())) return '—:—';
+            return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        }
+
+        function updateSunStatus(now, pos) {
+            const times = window.SunCalc.getTimes(now, userLat, userLon);
+            const noon = times.solarNoon;
+            const isMorning = noon && !Number.isNaN(noon.getTime()) ? now < noon : false;
+            const ph = phaseFor(pos.altitude, isMorning);
+
+            sunStatus.textContent = '';
+            const add = (text, cls) => {
+                const span = document.createElement('span');
+                span.textContent = text;
+                if (cls) span.className = cls;
+                sunStatus.appendChild(span);
+                return span;
+            };
+            add(`↑ ${formatClock(times.sunrise)}`);
+            add('·', 'sep');
+            add(`${ph.name} ${Math.round(pos.altitude)}°`, 'phase-now').style.color = ph.css;
+            add('·', 'sep');
+            add(`↓ ${formatClock(times.sunset)}`);
+        }
+
+        function updateCurrentSunPosition() {
+            if (userLat === null || userLon === null) return;
+            const now = new Date();
+            const pos = getSolarPosition(now, userLat, userLon);
+            currentSunAzimuth = pos.azimuth;
+            currentSunAltitude = pos.altitude;
+
+            const key = sunPathKeyFor(now, userLat, userLon);
+            if (key !== sunPathKey) {
+                sunPathKey = key;
+                sunPathSamples = buildSunPathSamples(userLat, userLon, now);
+            }
+            renderSunPath(now);
+
+            currentSunDot.style.display = 'block';
+            if (pos.altitude <= -6) currentSunDot.setAttribute('opacity', '0.4');
+            else if (pos.altitude < 0) currentSunDot.setAttribute('opacity', '0.75');
+            else currentSunDot.setAttribute('opacity', '1');
+            // Точка «сейчас» теперь живёт на самой траектории, а не на фиксированном радиусе
+            setSvgDotPosition(currentSunDot, currentSunAzimuth, altitudeToRadius(pos.altitude));
+
+            updateSunStatus(now, pos);
+        }
+
+        // Ниже -6° (конец синего часа) свет уже не работает на кадр,
+        // поэтому такие прохождения отбрасываются и поиск идёт в следующие сутки.
+        const SEARCH_MIN_ALTITUDE = -6;
+
+        function findSolarPassage(targetAzimuth, lat, lon) {
+            const MIN_ALTITUDE = SEARCH_MIN_ALTITUDE;
+            const AZ_TOLERANCE = 0.5;
+            const now = new Date();
+            let t = now.getTime();
+
+            const d1 = new Date();
+            const d2 = new Date();
+            const dMid = new Date();
+
+            for (let i = 0; i < 365 * 24; i++) {
+                let t1 = t + i * 3600000;
+                let t2 = t1 + 3600000;
+
+                d1.setTime(t1);
+                d2.setTime(t2);
+
+                let pos1 = getSolarPosition(d1, lat, lon);
+                let pos2 = getSolarPosition(d2, lat, lon);
+                let az1 = pos1.azimuth;
+                let az2 = pos2.azimuth;
+
+                let uAz2 = unwrapAzimuth(az2, az1);
+                let uTarget = unwrapAzimuth(targetAzimuth, az1);
+                
+                let minAz = Math.min(az1, uAz2);
+                let maxAz = Math.max(az1, uAz2);
+
+                if (uTarget >= minAz && uTarget <= maxAz) {
+                    let direction = Math.sign(uAz2 - az1);
+                    if (direction === 0) continue;
+
+                    let left = t1, right = t2;
+
+                    for (let step = 0; step < 20; step++) {
+                        let mid = (left + right) / 2;
+                        dMid.setTime(mid);
+                        
+                        let azMid = getSolarPosition(dMid, lat, lon).azimuth;
+                        let uAzMid = unwrapAzimuth(azMid, az1);
+
+                        if (direction > 0) {
+                            if (uAzMid > uTarget) right = mid;
+                            else left = mid;
+                        } else {
+                            if (uAzMid < uTarget) right = mid;
+                            else left = mid;
+                        }
+                    }
+
+                    const candidate = new Date((left + right) / 2);
+                    const candidatePos = getSolarPosition(candidate, lat, lon);
+                    if (candidatePos.altitude >= MIN_ALTITUDE &&
+                        Math.abs(unwrapAzimuth(candidatePos.azimuth, targetAzimuth) - targetAzimuth) < AZ_TOLERANCE) {
+                        return candidate;
+                    }
+                }
+            }
+            return null;
+        }
+
+        function formatResult(date, lat, lon) {
+            if (!date) return { dateStr: 'Не освещается', timeStr: null, special: '', valid: false };
+            const timeStr = date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+            const dTarget = new Date(date); dTarget.setHours(0,0,0,0);
+            const dNow = new Date(); dNow.setHours(0,0,0,0);
+            const diffDays = Math.round((dTarget - dNow) / 86400000);
+            
+            let dateStr = diffDays === 0 ? 'Сегодня' : diffDays === 1 ? 'Завтра' : date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+            
+            let special = '';
+            if (lat !== null && lon !== null) {
+                const pos = getSolarPosition(date, lat, lon);
+                const times = window.SunCalc.getTimes(date, lat, lon);
+                const noon = times.solarNoon;
+                const isMorning = noon && !Number.isNaN(noon.getTime()) ? date < noon : false;
+                const phase = phaseFor(pos.altitude, isMorning).name;
+                special = ` • ${phase} ☀︎ ${Math.round(pos.altitude)}°`;
+            }
+            return { dateStr, timeStr, special, valid: true };
+        }
+
+        // ==================== Управление состояниями ====================
+        function resetLock() {
+            stopChaosClock();
+            setAppState(STATE.READY);
+            targetAzimuth = null;
+            compassViewport.classList.remove('locked');
+            targetSunDot.style.display = 'none';
+            animatingSunDot.style.display = 'none';
+            shootLine.setAttribute('opacity', '0');
+            calcBtn.classList.remove('active');
+            dateLabel.textContent = '';
+            clearTimeout(clockTimeoutId);
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+            setClockTime(timeStr, false);
+            syncClockToNextMinute();
+            updateCurrentSunPosition();
+            if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; }
+            clearTimeout(storyWatchdogId);
+            storyWatchdogId = null;
+            if (stabilizationTimer) {
+                clearInterval(stabilizationTimer);
+                stabilizationTimer = null;
+            }
+        }
+
+        function handleOrientation(e) {
+            let heading = null;
+
+            // iOS: webkitCompassHeading уже отсчитан от истинного севера.
+            // Проверяем именно на число: `||` съедал ровный 0° (взгляд строго на север).
+            if (typeof e.webkitCompassHeading === 'number' && !Number.isNaN(e.webkitCompassHeading)) {
+                heading = e.webkitCompassHeading;
+            } else if (typeof e.alpha === 'number' && !Number.isNaN(e.alpha)) {
+                // Android/десктоп: alpha растёт против часовой стрелки.
+                // Компенсируем поворот экрана, иначе в ландшафте компас врёт на 90°.
+                const screenAngle = (screen.orientation && typeof screen.orientation.angle === 'number')
+                    ? screen.orientation.angle
+                    : (typeof window.orientation === 'number' ? window.orientation : 0);
+                heading = 360 - e.alpha + screenAngle;
+            }
+
+            if (heading !== null && (appState === STATE.READY || appState === STATE.LOCKED)) {
+                realHeading = normalizeAngle(heading);
+                recordHeading(realHeading);
+            }
+        }
+
+        function executeCalculation() {
+            if (userLat === null || appState !== STATE.READY) return;
+
+            if (!isHeadingStable()) {
+                dateLabel.textContent = 'Калибровка…';
+                if (!stabilizationTimer) {
+                    stabilizationTimer = setInterval(() => {
+                        if (isHeadingStable()) {
+                            clearInterval(stabilizationTimer);
+                            stabilizationTimer = null;
+                            dateLabel.textContent = '';
+                            executeCalculation();
+                        }
+                    }, 100);
+                }
+                return;
+            }
+
+            if (stabilizationTimer) {
+                clearInterval(stabilizationTimer);
+                stabilizationTimer = null;
+            }
+
+            setAppState(STATE.CALCULATING);
+            targetAzimuth = normalizeAngle(realHeading);
+            dateLabel.textContent = '';
+            startChaosClock();
+
+            setTimeout(() => {
+                const passageDate = findSolarPassage(targetAzimuth, userLat, userLon);
+                if (!passageDate) {
+                    dateLabel.textContent = 'Не освещается';
+                    setAppState(STATE.LOCKED);
+                    compassViewport.classList.add('locked');
+                    calcBtn.classList.add('active');
+                    targetSunDot.style.display = 'none';
+                    animatingSunDot.style.display = 'none';
+                    shootLine.setAttribute('opacity', '0');
+                    return;
+                }
+
+                const { dateStr, timeStr, special } = formatResult(passageDate, userLat, userLon);
+
+                // Мишень садится не на условный радиус 140, а туда, где солнце
+                // реально окажется по высоте — то есть точно на свою траекторию.
+                const targetAltitude = getSolarPosition(passageDate, userLat, userLon).altitude;
+                const finalR = altitudeToRadius(targetAltitude);
+                const startR = altitudeToRadius(currentSunAltitude);
+
+                const startT = performance.now();
+                targetSunDot.style.display = 'block';
+                animatingSunDot.style.display = 'block';
+                animatingSunDot.setAttribute('opacity', '1');
+
+                function animateStory(now) {
+                    const elapsed = now - startT;
+
+                    let p1 = Math.min(elapsed / STORY_SHOOT_MS, 1);
+                    let ease1 = 1 - Math.pow(1 - p1, 3);
+                    let targetR = ease1 * finalR;
+                    setSvgDotPosition(targetSunDot, targetAzimuth, targetR);
+
+                    const shootEnd = polar(targetAzimuth, targetR);
+                    shootLine.setAttribute('x2', shootEnd.x);
+                    shootLine.setAttribute('y2', shootEnd.y);
+                    shootLine.setAttribute('opacity', (p1 < 0.6 ? p1 * 1.5 : (1 - p1) * 2.5) * 0.4);
+
+                    if (elapsed > STORY_SHOOT_MS) {
+                        let p2 = Math.min((elapsed - STORY_SHOOT_MS) / STORY_TRAVEL_MS, 1);
+                        let ease2 = 1 - Math.pow(1 - p2, 4);
+
+                        let startAz = currentSunAzimuth;
+                        let diff = targetAzimuth - startAz;
+                        if (diff > 180) diff -= 360;
+                        if (diff < -180) diff += 360;
+
+                        let currentAz = startAz + diff * ease2;
+                        setSvgDotPosition(animatingSunDot, currentAz, startR + (finalR - startR) * ease2);
+
+                        if (p2 >= 1) { finishStory(); return; }
+                    }
+                    animationFrameId = requestAnimationFrame(animateStory);
+                }
+
+                // Финал ролика вынесен отдельно и идемпотентен: его же вызывает сторож
+                // ниже, если requestAnimationFrame встал (свернули приложение, погас экран).
+                function finishStory() {
+                    if (appState !== STATE.CALCULATING) return;
+                    clearTimeout(storyWatchdogId);
+                    if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; }
+
+                    setSvgDotPosition(targetSunDot, targetAzimuth, finalR);
+                    animatingSunDot.setAttribute('opacity', '0');
+                    targetSunDot.setAttribute('r', '10');
+                    setTimeout(() => targetSunDot.setAttribute('r', '7'), 150);
+
+                    shootLine.setAttribute('opacity', '0');
+                    dateLabel.textContent = dateStr + special;
+
+                    stopChaosClock();
+                    setClockTime(timeStr, false);
+
+                    compassViewport.classList.add('locked');
+                    calcBtn.classList.add('active');
+                    setAppState(STATE.LOCKED);
+                }
+
+                storyWatchdogId = setTimeout(finishStory, STORY_TOTAL_MS + 1500);
+                animationFrameId = requestAnimationFrame(animateStory);
+            }, 50);
+        }
+
+        function toggleLock() {
+            if (appState === STATE.CALCULATING) return;
+            if (appState === STATE.LOCKED) {
+                resetLock();
+            } else if (appState === STATE.READY) {
+                executeCalculation();
+            }
+        }
+
+        // Возврат из фона: браузер душит таймеры и rAF, поэтому пересобираем то,
+        // что могло отстать, — положение солнца, траекторию и минуты на часах.
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState !== 'visible') return;
+            if (appState === STATE.READY || appState === STATE.LOCKED) {
+                updateCurrentSunPosition();
+            }
+            if (appState === STATE.READY) {
+                clearTimeout(clockTimeoutId);
+                syncClockToNextMinute();
+            }
+        });
+
+        function startSunUpdater() {
+            clearInterval(sunUpdateIntervalId);
+            updateCurrentSunPosition();
+            sunUpdateIntervalId = setInterval(updateCurrentSunPosition, 60000);
+        }
+
+        // ==================== Инициализация и разрешения ====================
+        const onboardingDone = safeStorage.getItem('onboarding_done');
+        if (!onboardingDone) {
+            startOverlay.style.display = 'none';
+            onboardingOverlay.classList.remove('hidden');
+        } else {
+            onboardingOverlay.style.display = 'none';
+            startOverlay.classList.remove('hidden');
+        }
+
+        onboardingBtn.addEventListener('click', () => {
+            onboardingOverlay.classList.add('hidden');
+            startOverlay.style.display = 'flex';
+            safeStorage.setItem('onboarding_done', '1');
+        });
+
+        startBtn.addEventListener('click', async () => {
+            startBtn.textContent = 'Подключение...';
+            startBtn.style.pointerEvents = 'none';
+            setAppState(STATE.PERMISSION);
+
+            const requestPermission = async () => {
+                if (typeof DeviceOrientationEvent !== 'undefined' &&
+                    typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    try {
+                        const state = await DeviceOrientationEvent.requestPermission();
+                        if (state !== 'granted') {
+                            throw new Error('denied');
+                        }
+                        window.addEventListener('deviceorientation', handleOrientation, true);
+                    } catch (e) {
+                        alert('Для работы компаса необходимо разрешить доступ к датчикам движения. Перезагрузите страницу и разрешите.');
+                        startBtn.textContent = 'Включить компас';
+                        startBtn.style.pointerEvents = 'auto';
+                        setAppState(STATE.IDLE);
+                        return false;
+                    }
+                } else {
+                    window.addEventListener('deviceorientation', handleOrientation, true);
+                }
+                return true;
+            };
+
+            const orientationGranted = await requestPermission();
+            if (!orientationGranted) return;
+
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    pos => {
+                        userLat = pos.coords.latitude;
+                        userLon = pos.coords.longitude;
+                        reverseGeocode(userLat, userLon);
+                        startSunUpdater();
+                        setAppState(STATE.READY);
+                        startOverlay.classList.add('hidden');
+                        syncClockToNextMinute();
+                    },
+                    err => {
+                        userLat = 55.7558;
+                        userLon = 37.6173;
+                        locationLabel.textContent = 'Москва (Демо)';
+                        startSunUpdater();
+                        setAppState(STATE.READY);
+                        startOverlay.classList.add('hidden');
+                        syncClockToNextMinute();
+                    },
+                    { enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 }
+                );
+            } else {
+                userLat = 55.7558;
+                userLon = 37.6173;
+                locationLabel.textContent = 'Москва (Демо)';
+                startSunUpdater();
+                setAppState(STATE.READY);
+                startOverlay.classList.add('hidden');
+                syncClockToNextMinute();
+            }
+        });
+
+        function reverseGeocode(lat, lon) {
+            const cacheKey = `city_photon_${lat.toFixed(1)}_${lon.toFixed(1)}`;
+            const cachedCity = safeStorage.getItem(cacheKey);
+            if (cachedCity) {
+                locationLabel.textContent = cachedCity;
+                return;
+            }
+            locationLabel.textContent = `${lat.toFixed(2)}°, ${lon.toFixed(2)}°`;
+
+            fetch(`https://photon.komoot.io/reverse?lon=${lon}&lat=${lat}`)
+            .then(r => {
+                if (!r.ok) throw new Error('network');
+                return r.json();
+            })
+            .then(data => {
+                if (data.features && data.features.length > 0) {
+                    const props = data.features[0].properties;
+                    const city = props.city || props.town || props.village || props.county || props.state || props.country;
+                    if (city) {
+                        locationLabel.textContent = city;
+                        safeStorage.setItem(cacheKey, city);
+                    }
+                }
+            })
+            .catch(() => {
+                locationLabel.textContent = locationLabel.textContent || 'Определено';
+            });
+        }
+
+        // Назначение обработчиков тапов
+        calcBtn.addEventListener('click', handleShutterTap);
+        compassViewport.addEventListener('click', handleCompassTap);
+
+        // ==================== Офлайн (Service Worker) ====================
+        // Регистрируется только на https и localhost: по file:// Service Worker
+        // недоступен, и приложение просто работает как обычная страница.
+        if ('serviceWorker' in navigator &&
+            (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').catch(() => { /* офлайн-режим просто не включится */ });
+            });
+        }
+    </script>
+</body>
+</html>
