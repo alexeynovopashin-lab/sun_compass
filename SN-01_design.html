@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>SN-01 — Design Concept</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: #d8d3c9;
+            background-image: linear-gradient(180deg, #e5dfd4 0%, #d0c9bc 100%);
+            min-height: 100vh;
+            min-height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #2A2A2A;
+            padding: 24px 16px;
+            gap: 18px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .mode-label {
+            text-align: center;
+            font-size: 12px;
+            letter-spacing: 1.4px;
+            text-transform: uppercase;
+            color: #6a635a;
+            font-weight: 500;
+        }
+
+        .mode-label span {
+            display: block;
+            font-size: 11px;
+            letter-spacing: 0.4px;
+            color: #9a938a;
+            margin-top: 3px;
+            text-transform: none;
+            font-weight: 400;
+        }
+
+        /* === Корпус (пропорции близки к исходному) === */
+        #sn01-device {
+            background-color: #E8E5DF;
+            width: 320px;
+            height: 680px;
+            max-width: 92vw;
+            max-height: 88dvh;
+            border-radius: 14px;
+            padding: 32px 22px 36px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+            box-shadow:
+                inset 2px 2px 4px #FFFFFF,
+                inset -2px -2px 6px #CFCBC4,
+                14px 16px 32px rgba(0,0,0,0.14),
+                -4px -4px 12px rgba(255,255,255,0.35);
+        }
+
+        /* === Углублённый циферблат === */
+        .dial-housing {
+            width: 236px;
+            height: 236px;
+            border-radius: 50%;
+            background: #1c1c1c;
+            position: relative;
+            margin-bottom: 26px;
+            flex-shrink: 0;
+            box-shadow:
+                inset 7px 8px 18px rgba(0,0,0,0.9),
+                inset -2px -3px 10px rgba(255,255,255,0.07),
+                0 1px 2px rgba(255,255,255,0.75);
+        }
+
+        .dial-housing svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+            border-radius: 50%;
+        }
+
+        /* === Легенда === */
+        .legend {
+            width: 100%;
+            padding: 0 6px;
+            margin-bottom: 22px;
+            flex-grow: 1;
+        }
+
+        .legend-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 5.5px 2px;
+            font-size: 10.5px;
+            letter-spacing: 0.25px;
+            color: #333;
+            line-height: 1.25;
+        }
+
+        .legend-row + .legend-row {
+            border-top: 1px solid rgba(0,0,0,0.045);
+        }
+
+        .legend-left {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+        }
+
+        .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .dot.gold   { background: #E8BE43; }
+        .dot.white  { background: #EAEAEA; box-shadow: inset 0 0 0 1px #bbb; }
+        .dot.sunset { background: #C25B36; }
+        .dot.blue   { background: #194883; }
+        .dot.night  { background: #6a6a6a; }
+
+        .legend-time {
+            font-variant-numeric: tabular-nums;
+            color: #555;
+            font-size: 10px;
+            letter-spacing: 0.15px;
+            white-space: nowrap;
+        }
+
+        /* === Одометр — механические барабаны === */
+        .odometer {
+            display: flex;
+            gap: 2px;
+            background: #A9A49A;
+            padding: 5px;
+            border-radius: 4px;
+            box-shadow:
+                inset 2px 2px 5px rgba(0,0,0,0.4),
+                inset -1px -1px 2px rgba(255,255,255,0.15);
+            margin-bottom: 28px;
+        }
+
+        .cylinder {
+            width: 26px;
+            height: 38px;
+            background: linear-gradient(
+                180deg,
+                #f2efe9 0%,
+                #e9e5de 18%,
+                #e0dbd3 45%,
+                #d6d1c8 55%,
+                #e4e0d8 82%,
+                #ece8e1 100%
+            );
+            border-radius: 2px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 18px;
+            font-weight: 500;
+            color: #222;
+            position: relative;
+            /* Собственная тень барабана (верх + низ) */
+            box-shadow:
+                inset 0 7px 6px -5px rgba(0,0,0,0.32),
+                inset 0 -7px 6px -5px rgba(0,0,0,0.28),
+                inset 1px 0 2px rgba(255,255,255,0.5),
+                inset -1px 0 2px rgba(0,0,0,0.12),
+                0 0 0 1px rgba(0,0,0,0.12);
+            font-variant-numeric: tabular-nums;
+            overflow: hidden;
+        }
+
+        /* Боковые «грани» вращения */
+        .cylinder::before,
+        .cylinder::after {
+            content: '';
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: rgba(0,0,0,0.08);
+            pointer-events: none;
+        }
+        .cylinder::before { top: 28%; }
+        .cylinder::after  { bottom: 28%; }
+
+        /* === Алюминиевая кнопка === */
+        .aluminum-button {
+            width: 78px;
+            height: 78px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            /* Алюминий: мягкий металлический градиент + ободок */
+            background:
+                radial-gradient(ellipse at 35% 30%, #f8f8f8 0%, transparent 55%),
+                linear-gradient(145deg, #ececec 0%, #c8c8c8 40%, #b0b0b0 70%, #d0d0d0 100%);
+            box-shadow:
+                /* внешняя тень */
+                4px 5px 12px rgba(0,0,0,0.18),
+                1px 2px 4px rgba(0,0,0,0.1),
+                /* светлый ободок сверху */
+                inset 0 1px 1px rgba(255,255,255,0.95),
+                /* тёмный ободок снизу */
+                inset 0 -1.5px 2px rgba(0,0,0,0.15),
+                /* внутренний объём */
+                inset 2px 2px 4px rgba(255,255,255,0.7),
+                inset -2px -2px 4px rgba(0,0,0,0.08),
+                /* тонкая кромка */
+                0 0 0 1px rgba(140,140,140,0.55);
+            transition: transform 0.1s ease, box-shadow 0.1s ease;
+        }
+
+        .aluminum-button:active {
+            transform: scale(0.97);
+            box-shadow:
+                1px 2px 5px rgba(0,0,0,0.15),
+                inset 2px 3px 6px rgba(0,0,0,0.2),
+                inset -1px -1px 2px rgba(255,255,255,0.4),
+                0 0 0 1px rgba(120,120,120,0.5);
+        }
+
+        .led-indicator {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #E8BE43;
+            box-shadow:
+                0 0 7px 1.5px rgba(232,190,67,0.75),
+                inset 0.5px 0.5px 1px rgba(255,255,255,0.7);
+            pointer-events: none;
+        }
+
+        .hint {
+            font-size: 11px;
+            color: #9a938a;
+        }
+
+        /* OFF state */
+        #sn01-device.off .sun-path,
+        #sn01-device.off .sun-glow,
+        #sn01-device.off .sun-dot,
+        #sn01-device.off .legend {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="mode-label" id="modeLabel">
+        РЕЖИМ ВКЛЮЧЕН
+        <span>зоны дня на траектории солнца</span>
+    </div>
+
+    <div id="sn01-device">
+        <!-- Циферблат -->
+        <div class="dial-housing">
+            <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <!-- Градиент дуги солнца -->
+                    <linearGradient id="sunPathGrad" gradientUnits="userSpaceOnUse"
+                                    x1="62" y1="12" x2="78" y2="88">
+                        <stop offset="0%"   stop-color="#E8BE43"/>
+                        <stop offset="18%"  stop-color="#F0D878"/>
+                        <stop offset="35%"  stop-color="#FFFFFF"/>
+                        <stop offset="55%"  stop-color="#E07A3D"/>
+                        <stop offset="75%"  stop-color="#C25B36"/>
+                        <stop offset="100%" stop-color="#194883"/>
+                    </linearGradient>
+
+                    <!-- Мягкое свечение дуги -->
+                    <filter id="pathGlow" x="-30%" y="-30%" width="160%" height="160%">
+                        <feGaussianBlur stdDeviation="1.4" result="blur"/>
+                        <feMerge>
+                            <feMergeNode in="blur"/>
+                            <feMergeNode in="SourceGraphic"/>
+                        </feMerge>
+                    </filter>
+
+                    <filter id="sunGlow" x="-120%" y="-120%" width="340%" height="340%">
+                        <feGaussianBlur stdDeviation="1.6" result="blur"/>
+                        <feMerge>
+                            <feMergeNode in="blur"/>
+                            <feMergeNode in="SourceGraphic"/>
+                        </feMerge>
+                    </filter>
+                </defs>
+
+                <!-- Точечная разметка (внутреннее кольцо) -->
+                <circle cx="50" cy="50" r="38.5" fill="none" stroke="#6a6a6a"
+                        stroke-width="0.9" stroke-dasharray="0.55 2.65" stroke-linecap="round"/>
+
+                <!-- Кардинальные риски (короткие, рядом с буквами) -->
+                <!-- N -->
+                <line x1="50" y1="8.2" x2="50" y2="11.8" stroke="#E8BE43" stroke-width="0.9" stroke-linecap="round"/>
+                <!-- S -->
+                <line x1="50" y1="88.2" x2="50" y2="91.8" stroke="#888" stroke-width="0.8" stroke-linecap="round"/>
+                <!-- W -->
+                <line x1="8.2" y1="50" x2="11.8" y2="50" stroke="#888" stroke-width="0.8" stroke-linecap="round"/>
+                <!-- E -->
+                <line x1="88.2" y1="50" x2="91.8" y2="50" stroke="#888" stroke-width="0.8" stroke-linecap="round"/>
+
+                <!-- Буквы — снаружи от пунктира, рядом с рисками -->
+                <text x="50" y="6.6" fill="#E8BE43" font-size="5.2" font-weight="600"
+                      text-anchor="middle" font-family="Helvetica Neue, Helvetica, Arial, sans-serif">N</text>
+                <text x="50" y="96.2" fill="#999" font-size="4.8"
+                      text-anchor="middle" font-family="Helvetica Neue, Helvetica, Arial, sans-serif">S</text>
+                <text x="5.2" y="51.7" fill="#999" font-size="4.8"
+                      text-anchor="middle" font-family="Helvetica Neue, Helvetica, Arial, sans-serif">W</text>
+                <text x="94.8" y="51.7" fill="#999" font-size="4.8"
+                      text-anchor="middle" font-family="Helvetica Neue, Helvetica, Arial, sans-serif">E</text>
+
+                <!-- Траектория солнца (дуга справа) -->
+                <path class="sun-path"
+                      d="M 64 11.5
+                         A 39.5 39.5 0 0 1 88.5 42
+                         A 39.5 39.5 0 0 1 80 78
+                         A 39.5 39.5 0 0 1 55 90"
+                      fill="none"
+                      stroke="url(#sunPathGrad)"
+                      stroke-width="2.4"
+                      stroke-linecap="round"
+                      filter="url(#pathGlow)"
+                      opacity="0.95"/>
+
+                <!-- Солнце -->
+                <circle class="sun-dot" cx="84.5" cy="27" r="2.6" fill="#FFFFFF" filter="url(#sunGlow)"/>
+                <circle class="sun-dot" cx="84.5" cy="27" r="1.5" fill="#FFF6D8"/>
+
+                <!-- === Стрелка компаса (длинная, как на референсе) === -->
+                <!-- Южный хвост (тонкий) -->
+                <line x1="50" y1="50" x2="50" y2="82"
+                      stroke="#8a8a8a" stroke-width="1.15" stroke-linecap="round"/>
+
+                <!-- Северная часть (тоньше и светлее) -->
+                <line x1="50" y1="50" x2="50" y2="14.5"
+                      stroke="#d8d8d8" stroke-width="1.25" stroke-linecap="round"/>
+
+                <!-- Центральный пивот (крупный) -->
+                <circle cx="50" cy="50" r="3.6" fill="#7a7a7a"/>
+                <circle cx="50" cy="50" r="2.5" fill="#9a9a9a"/>
+                <circle cx="50" cy="50" r="1.1" fill="#c0c0c0"/>
+
+                <!-- Южный противовес / наконечник -->
+                <circle cx="50" cy="79.5" r="2.4" fill="#8a8a8a"/>
+                <circle cx="50" cy="79.5" r="1.4" fill="#a8a8a8"/>
+            </svg>
+        </div>
+
+        <!-- Легенда -->
+        <div class="legend">
+            <div class="legend-row">
+                <div class="legend-left"><span class="dot gold"></span>ЗОЛОТОЙ ЧАС (утро)</div>
+                <div class="legend-time">05:35 – 06:32</div>
+            </div>
+            <div class="legend-row">
+                <div class="legend-left"><span class="dot white"></span>ВОСХОД</div>
+                <div class="legend-time">05:35</div>
+            </div>
+            <div class="legend-row">
+                <div class="legend-left"><span class="dot white"></span>ДЕНЬ</div>
+                <div class="legend-time">06:32 – 19:12</div>
+            </div>
+            <div class="legend-row">
+                <div class="legend-left"><span class="dot gold"></span>ЗОЛОТОЙ ЧАС (вечер)</div>
+                <div class="legend-time">19:12 – 20:09</div>
+            </div>
+            <div class="legend-row">
+                <div class="legend-left"><span class="dot sunset"></span>ЗАКАТ</div>
+                <div class="legend-time">20:09</div>
+            </div>
+            <div class="legend-row">
+                <div class="legend-left"><span class="dot blue"></span>СИНИЙ ЧАС</div>
+                <div class="legend-time">20:09 – 20:45</div>
+            </div>
+            <div class="legend-row">
+                <div class="legend-left"><span class="dot night"></span>НОЧЬ</div>
+                <div class="legend-time">20:45 – 05:35</div>
+            </div>
+        </div>
+
+        <!-- Одометр -->
+        <div class="odometer">
+            <div class="cylinder">1</div>
+            <div class="cylinder">2</div>
+            <div class="cylinder">3</div>
+            <div class="cylinder">4</div>
+        </div>
+
+        <!-- Кнопка -->
+        <button class="aluminum-button" id="powerBtn" aria-label="Power">
+            <div class="led-indicator"></div>
+        </button>
+    </div>
+
+    <div class="hint">Нажмите кнопку, чтобы переключить режим</div>
+
+    <script>
+        const device = document.getElementById('sn01-device');
+        const modeLabel = document.getElementById('modeLabel');
+        const btn = document.getElementById('powerBtn');
+        let isOn = true;
+
+        btn.addEventListener('click', () => {
+            isOn = !isOn;
+            device.classList.toggle('off', !isOn);
+            modeLabel.innerHTML = isOn
+                ? 'РЕЖИМ ВКЛЮЧЕН<span>зоны дня на траектории солнца</span>'
+                : 'РЕЖИМ ОТКЛЮЧЕН<span>обычный вид</span>';
+        });
+    </script>
+</body>
+</html>
