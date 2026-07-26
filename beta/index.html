@@ -372,6 +372,69 @@
         }
         .sun-status .phase-now { color: var(--phase-day); transition: color 0.6s ease; }
         .sun-status .sep { opacity: 0.3; }
+        /* В скрытом режиме строка становится ручкой легенды */
+        .sun-status.expandable { cursor: pointer; }
+        .sun-status.expandable::after {
+            content: "";
+            width: 5px; height: 5px;
+            border-right: 1px solid rgba(255,255,255,0.35);
+            border-bottom: 1px solid rgba(255,255,255,0.35);
+            transform: rotate(-135deg) translate(-1px, -1px);
+            transition: transform 0.3s ease;
+        }
+        .sun-status.expandable.open::after { transform: rotate(45deg) translate(-1px, -1px); }
+
+        /* Легенда зон дня — пасхалка скрытого режима */
+        .zone-legend {
+            position: fixed;
+            left: 0; right: 0; bottom: 0;
+            z-index: 30;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 22px 26px calc(env(safe-area-inset-bottom) + 22px);
+            background: rgba(8, 8, 8, 0.94);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 22px 22px 0 0;
+            transform: translateY(101%);
+            transition: transform 0.38s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+        .zone-legend.open { transform: translateY(0); }
+
+        /* Полоска-ручка: единственный намёк, что панель закрывается тапом */
+        .zone-legend::before {
+            content: "";
+            width: 36px;
+            height: 4px;
+            border-radius: 2px;
+            background: rgba(255, 255, 255, 0.18);
+            align-self: center;
+            margin-bottom: 6px;
+        }
+
+        .zone-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            font-size: 11px;
+            font-weight: 500;
+            letter-spacing: 0.9px;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.5);
+        }
+        .zone-name { display: flex; align-items: center; gap: 10px; min-width: 0; }
+        .zone-name span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .zone-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+        .zone-time {
+            font-variant-numeric: tabular-nums;
+            letter-spacing: 0.2px;
+            text-transform: none;
+            color: rgba(255, 255, 255, 0.8);
+            white-space: nowrap;
+        }
         /* В zoom-режиме подвал не должен спорить с увеличенным компасом */
         body.zoomed .location-name,
         body.zoomed .sun-status { opacity: 0.35; transition: opacity 0.4s ease; }
@@ -448,8 +511,8 @@
             <!-- Пунктирная окружность r=115 — линия горизонта (высота солнца 0°) -->
             <circle cx="170" cy="170" r="115" stroke="rgba(255,255,255,0.13)" stroke-width="1" stroke-dasharray="2 4" fill="none"/>
 
-            <!-- Траектория солнца «сегодня». Обычный режим — на кольце горизонта,
-                 проф-режим — с выносом по высоте (радиус = зенитное расстояние) -->
+            <!-- Ход солнца за сутки: рисуется только в скрытом режиме,
+                 угол = азимут, радиус = зенитное расстояние -->
             <g id="sunPathGroup"></g>
 
             <g id="ticksGroup"></g>
@@ -470,6 +533,9 @@
         <div class="location-name" id="locationLabel">Определение...</div>
         <div class="sun-status" id="sunStatus"></div>
     </div>
+
+    <!-- Легенда зон дня: выезжает по тапу на строку состояния, только в скрытом режиме -->
+    <div class="zone-legend" id="zoneLegend" aria-hidden="true"></div>
 
     <div class="build-number" id="buildNumber"></div>
 
@@ -557,6 +623,7 @@
         const locationLabel = document.getElementById('locationLabel');
         const sunStatus = document.getElementById('sunStatus');
         const sunPathGroup = document.getElementById('sunPathGroup');
+        const zoneLegend = document.getElementById('zoneLegend');
         const compassSvg = document.getElementById('compassSvg');
         const compassViewport = document.getElementById('compassViewport');
         const currentSunDot = document.getElementById('currentSunDot');
@@ -780,7 +847,7 @@
             else enterZoomMode();
         }
 
-        // Детектор тапов: одиночный — замер/сброс, двойной — проф-режим, тройной — zoom.
+        // Детектор тапов: одиночный — замер/сброс, двойной — скрытый режим, тройной — zoom.
         // Счётчик у каждой цели свой, чтобы тап по компасу и тап по кнопке не складывались.
         const TAP_WINDOW_MS = 300;
 
@@ -800,7 +867,7 @@
 
                 timer = setTimeout(() => {
                     if (count === 1) toggleLock();
-                    else if (count === 2) toggleProMode();
+                    else if (count === 2) toggleHiddenMode();
                     count = 0;
                 }, TAP_WINDOW_MS);
             };
@@ -869,46 +936,52 @@
             return SUN_PHASES[SUN_PHASES.length - 1];
         }
 
-        // ==================== Траектория солнца «сегодня» ====================
-        // Два режима отрисовки одной и той же выборки:
+        // ==================== Скрытый режим ====================
+        // Пасхалка, а не тир функций. По умолчанию прибор ничего лишнего не показывает:
+        // шкала, белая точка солнца сейчас, золотая точка замера — и всё.
         //
-        //   Обычный  — вся траектория лежит на кольце горизонта (r = 115).
-        //              Читается за долю секунды: «оранжевое — там сядет солнце».
-        //              Высота солнца на кольцо не выносится, её показывает строка состояния.
-        //
-        //   Проф.    — полярная проекция: радиус = зенитное расстояние. Горизонт остаётся
-        //              на r = 115, зенит стянут в центр, сумерки уходят наружу.
-        //              Нужен ближе к экватору, где весь день умещается в узкий сектор
-        //              азимутов и без высоты дуга вырождается в короткий штрих.
-        //
-        // Переключение — двойной тап по компасу или по кнопке спуска.
-        const HORIZON_R    = 115;
+        // Двойной тап по компасу или по кнопке спуска открывает скрытый режим: на диск
+        // ложится ход солнца за сутки в полярной проекции (угол — азимут, радиус —
+        // зенитное расстояние) и становится доступна сворачиваемая легенда зон дня.
+        // Именно эта проекция работает ближе к экватору, где солнце идёт почти через
+        // зенит: азимут за день меняется мало, и на голом кольце сутки сжимаются в штрих.
+        const HORIZON_R    = 115;   // орбита точки солнца и линия горизонта скрытого режима
+        const TARGET_R     = 140;   // внешняя орбита мишени в обычном режиме
         const PATH_MIN_ALT = -18;                                  // глубже астрономических сумерек не рисуем
         const PATH_MAX_R   = HORIZON_R * (1 - PATH_MIN_ALT / 90);  // ≈138, деления начинаются с 148
         const PATH_MIN_R   = 10;
         const PATH_STEP_MS = 2 * 60 * 1000;                        // шаг выборки: 2 минуты ≈ 1 px дуги
 
-        let proMode = safeStorage.getItem('pro_mode') === '1';
+        let hiddenMode = safeStorage.getItem('hidden_mode') === '1';
 
+        // Радиус точки солнца «сейчас» и летящей точки ролика
         function altitudeToRadius(altitude) {
-            if (!proMode) return HORIZON_R;
+            if (!hiddenMode) return HORIZON_R;
             const r = HORIZON_R * (1 - altitude / 90);
             return Math.max(PATH_MIN_R, Math.min(PATH_MAX_R, r));
         }
 
-        function setProMode(on) {
-            proMode = on;
-            safeStorage.setItem('pro_mode', on ? '1' : '0');
-            buildNumberEl.textContent = on ? `v${APP_VERSION} · ПРОФ` : `v${APP_VERSION}`;
+        // Мишень в обычном режиме живёт на своей внешней орбите — так было до траектории
+        function targetRadius(altitude) {
+            return hiddenMode ? altitudeToRadius(altitude) : TARGET_R;
+        }
+
+        function setHiddenMode(on) {
+            hiddenMode = on;
+            safeStorage.setItem('hidden_mode', on ? '1' : '0');
+            // Метка тихая: имя из вашего концепта, а не крикливое «ПРО»
+            buildNumberEl.textContent = on ? `v${APP_VERSION} · SN-01` : `v${APP_VERSION}`;
+            sunStatus.classList.toggle('expandable', on);
+            if (!on) closeZoneLegend();
             updateCurrentSunPosition();
             // Мишень уже стоящего замера пересаживаем на новый радиус, а не бросаем в воздухе
             if (appState === STATE.LOCKED && targetAzimuth !== null && lockedAltitude !== null) {
-                setSvgDotPosition(targetSunDot, targetAzimuth, altitudeToRadius(lockedAltitude));
+                setSvgDotPosition(targetSunDot, targetAzimuth, targetRadius(lockedAltitude));
             }
         }
 
-        function toggleProMode() {
-            setProMode(!proMode);
+        function toggleHiddenMode() {
+            setHiddenMode(!hiddenMode);
         }
 
         // Опорные точки градиента вдоль траектории (по убыванию высоты).
@@ -971,7 +1044,7 @@
 
         function renderSunPath(now) {
             sunPathGroup.textContent = '';
-            if (!sunPathSamples.length) return;
+            if (!hiddenMode || !sunPathSamples.length) return;
 
             const nowT = now.getTime();
             const COLOR_DELTA = 12; // суммарная разница RGB, после которой начинаем новый сегмент
@@ -1021,6 +1094,68 @@
             return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
         }
 
+        // ==================== Легенда зон дня (только в скрытом режиме) ====================
+        // Времена берём из готовых событий SunCalc, а не из порогов SUN_PHASES: у таблицы
+        // времён своя логика — золотой час начинается от видимого восхода (−0.833°),
+        // тогда как раскраска дуги считает его от 0°. Расхождение — считаные минуты.
+        function buildZones(now) {
+            const t = window.SunCalc.getTimes(now, userLat, userLon);
+            const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
+            const t2 = window.SunCalc.getTimes(tomorrow, userLat, userLon);
+            return [
+                { name: 'Золотой час (утро)',  color: 'var(--phase-golden)',  from: t.sunrise,       to: t.goldenHourEnd },
+                { name: 'Восход',              color: '#ffffff',              at:   t.sunrise },
+                { name: 'День',                color: 'var(--phase-day)',     from: t.goldenHourEnd, to: t.goldenHour },
+                { name: 'Золотой час (вечер)', color: 'var(--phase-golden)',  from: t.goldenHour,    to: t.sunset },
+                { name: 'Закат',               color: 'var(--phase-sunset)',  at:   t.sunset },
+                { name: 'Синий час',           color: 'var(--phase-blue)',    from: t.sunset,        to: t.dusk },
+                { name: 'Ночь',                color: 'var(--phase-twilight)', from: t.dusk,         to: t2.sunrise }
+            ];
+        }
+
+        function renderZoneLegend(now) {
+            zoneLegend.textContent = '';
+            for (const z of buildZones(now)) {
+                const row = document.createElement('div');
+                row.className = 'zone-row';
+
+                const left = document.createElement('div');
+                left.className = 'zone-name';
+                const dot = document.createElement('span');
+                dot.className = 'zone-dot';
+                dot.style.background = z.color;
+                const label = document.createElement('span');
+                label.textContent = z.name;
+                left.append(dot, label);
+
+                const time = document.createElement('div');
+                time.className = 'zone-time';
+                time.textContent = z.at ? formatClock(z.at) : `${formatClock(z.from)} – ${formatClock(z.to)}`;
+
+                row.append(left, time);
+                zoneLegend.appendChild(row);
+            }
+        }
+
+        function openZoneLegend() {
+            if (!hiddenMode || userLat === null) return;
+            renderZoneLegend(new Date());
+            zoneLegend.classList.add('open');
+            sunStatus.classList.add('open');
+            zoneLegend.setAttribute('aria-hidden', 'false');
+        }
+
+        function closeZoneLegend() {
+            zoneLegend.classList.remove('open');
+            sunStatus.classList.remove('open');
+            zoneLegend.setAttribute('aria-hidden', 'true');
+        }
+
+        function toggleZoneLegend() {
+            if (zoneLegend.classList.contains('open')) closeZoneLegend();
+            else openZoneLegend();
+        }
+
         function updateSunStatus(now, pos) {
             const times = window.SunCalc.getTimes(now, userLat, userLon);
             const noon = times.solarNoon;
@@ -1049,24 +1184,27 @@
             currentSunAzimuth = pos.azimuth;
             currentSunAltitude = pos.altitude;
 
-            const key = sunPathKeyFor(now, userLat, userLon);
-            if (key !== sunPathKey) {
-                sunPathKey = key;
-                sunPathSamples = buildSunPathSamples(userLat, userLon, now);
+            // Сутки семплируем только когда есть что рисовать
+            if (hiddenMode) {
+                const key = sunPathKeyFor(now, userLat, userLon);
+                if (key !== sunPathKey) {
+                    sunPathKey = key;
+                    sunPathSamples = buildSunPathSamples(userLat, userLon, now);
+                }
             }
             renderSunPath(now);
 
             currentSunDot.style.display = 'block';
-            // Глубокой ночью точка уезжает за край нарисованной траектории — гасим её почти совсем,
-            // чтобы одинокий кружок не читался как ошибка
-            if (pos.altitude < PATH_MIN_ALT) currentSunDot.setAttribute('opacity', '0.18');
+            // Глубокой ночью в скрытом режиме точка уезжает за край нарисованной траектории —
+            // гасим её почти совсем, чтобы одинокий кружок не читался как ошибка
+            if (hiddenMode && pos.altitude < PATH_MIN_ALT) currentSunDot.setAttribute('opacity', '0.18');
             else if (pos.altitude <= -6) currentSunDot.setAttribute('opacity', '0.4');
             else if (pos.altitude < 0) currentSunDot.setAttribute('opacity', '0.75');
             else currentSunDot.setAttribute('opacity', '1');
-            // Точка «сейчас» теперь живёт на самой траектории, а не на фиксированном радиусе
             setSvgDotPosition(currentSunDot, currentSunAzimuth, altitudeToRadius(pos.altitude));
 
             updateSunStatus(now, pos);
+            if (zoneLegend.classList.contains('open')) renderZoneLegend(now);
         }
 
         // Ниже -6° (конец синего часа) свет уже не работает на кадр,
@@ -1251,7 +1389,7 @@
                 // реально окажется по высоте — то есть точно на свою траекторию.
                 const targetAltitude = getSolarPosition(passageDate, userLat, userLon).altitude;
                 lockedAltitude = targetAltitude;
-                const finalR = altitudeToRadius(targetAltitude);
+                const finalR = targetRadius(targetAltitude);
                 const startR = altitudeToRadius(currentSunAltitude);
 
                 const startT = performance.now();
@@ -1281,8 +1419,12 @@
                         if (diff > 180) diff -= 360;
                         if (diff < -180) diff += 360;
 
+                        // В обычном режиме летящая точка идёт по своей орбите r=115, а мишень
+                        // ждёт её на внешней r=140 — как было до появления траектории.
+                        // В скрытом режиме обе сходятся в одной точке дуги.
+                        const animEndR = hiddenMode ? finalR : startR;
                         let currentAz = startAz + diff * ease2;
-                        setSvgDotPosition(animatingSunDot, currentAz, startR + (finalR - startR) * ease2);
+                        setSvgDotPosition(animatingSunDot, currentAz, startR + (animEndR - startR) * ease2);
 
                         if (p2 >= 1) { finishStory(); return; }
                     }
@@ -1346,7 +1488,10 @@
         }
 
         // ==================== Инициализация и разрешения ====================
-        if (proMode) buildNumberEl.textContent = `v${APP_VERSION} · ПРОФ`;
+        if (hiddenMode) {
+            buildNumberEl.textContent = `v${APP_VERSION} · SN-01`;
+            sunStatus.classList.add('expandable');
+        }
 
         const onboardingDone = safeStorage.getItem('onboarding_done');
         if (!onboardingDone) {
@@ -1458,6 +1603,9 @@
         // Назначение обработчиков тапов
         calcBtn.addEventListener('click', handleShutterTap);
         compassViewport.addEventListener('click', handleCompassTap);
+        sunStatus.addEventListener('click', toggleZoneLegend);
+        // Тап по самой легенде её закрывает — отдельной кнопки закрытия прибору не нужно
+        zoneLegend.addEventListener('click', closeZoneLegend);
 
         // ==================== Офлайн (Service Worker) ====================
         // Регистрируется только на https и localhost: по file:// Service Worker
