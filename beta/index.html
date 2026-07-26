@@ -448,10 +448,9 @@
             <!-- Пунктирная окружность r=115 — линия горизонта (высота солнца 0°) -->
             <circle cx="170" cy="170" r="115" stroke="rgba(255,255,255,0.13)" stroke-width="1" stroke-dasharray="2 4" fill="none"/>
 
-            <!-- Траектория солнца «сегодня»: угол = азимут, радиус = высота над горизонтом -->
+            <!-- Траектория солнца «сегодня». Обычный режим — на кольце горизонта,
+                 проф-режим — с выносом по высоте (радиус = зенитное расстояние) -->
             <g id="sunPathGroup"></g>
-            <!-- Засечки восхода и захода на линии горизонта -->
-            <g id="horizonMarksGroup"></g>
 
             <g id="ticksGroup"></g>
             <g id="lettersGroup"></g>
@@ -479,7 +478,8 @@
         // Единственный источник правды о версии. Меняется вручную при релизе
         // и должен совпадать с CACHE_NAME в sw.js и заголовком в docs/CHANGELOG.md.
         const APP_VERSION = '2.0.0-beta';
-        document.getElementById('buildNumber').textContent = `v${APP_VERSION}`;
+        const buildNumberEl = document.getElementById('buildNumber');
+        buildNumberEl.textContent = `v${APP_VERSION}`;
 
         // Ручная микроподстройка смещения при необходимости (в пикселях)
         const ZOOM_FINE_TUNE = 0; 
@@ -557,7 +557,6 @@
         const locationLabel = document.getElementById('locationLabel');
         const sunStatus = document.getElementById('sunStatus');
         const sunPathGroup = document.getElementById('sunPathGroup');
-        const horizonMarksGroup = document.getElementById('horizonMarksGroup');
         const compassSvg = document.getElementById('compassSvg');
         const compassViewport = document.getElementById('compassViewport');
         const currentSunDot = document.getElementById('currentSunDot');
@@ -587,6 +586,7 @@
         let visualHeading = 0;
         let currentSunAzimuth = 0;
         let targetAzimuth = null;
+        let lockedAltitude = null;   // высота солнца в найденный момент — нужна при смене режима
         let animationFrameId = null;
         let clockTimeoutId = null;
         let sunUpdateIntervalId = null;
@@ -780,7 +780,7 @@
             else enterZoomMode();
         }
 
-        // Детектор тапов: одиночный — замер/сброс, тройной — zoom.
+        // Детектор тапов: одиночный — замер/сброс, двойной — проф-режим, тройной — zoom.
         // Счётчик у каждой цели свой, чтобы тап по компасу и тап по кнопке не складывались.
         const TAP_WINDOW_MS = 300;
 
@@ -791,6 +791,7 @@
                 count++;
                 clearTimeout(timer);
 
+                // Тройной срабатывает сразу: ждать нечего, больше вариантов нет
                 if (count === 3) {
                     count = 0;
                     toggleZoomMode();
@@ -799,6 +800,7 @@
 
                 timer = setTimeout(() => {
                     if (count === 1) toggleLock();
+                    else if (count === 2) toggleProMode();
                     count = 0;
                 }, TAP_WINDOW_MS);
             };
@@ -868,18 +870,45 @@
         }
 
         // ==================== Траектория солнца «сегодня» ====================
-        // Полярная проекция: угол = азимут, радиус = зенитное расстояние.
-        // Горизонт (0°) ложится ровно на пунктирную окружность r=115,
-        // зенит стянут в центр, сумерки уходят наружу — но не дальше делений.
+        // Два режима отрисовки одной и той же выборки:
+        //
+        //   Обычный  — вся траектория лежит на кольце горизонта (r = 115).
+        //              Читается за долю секунды: «оранжевое — там сядет солнце».
+        //              Высота солнца на кольцо не выносится, её показывает строка состояния.
+        //
+        //   Проф.    — полярная проекция: радиус = зенитное расстояние. Горизонт остаётся
+        //              на r = 115, зенит стянут в центр, сумерки уходят наружу.
+        //              Нужен ближе к экватору, где весь день умещается в узкий сектор
+        //              азимутов и без высоты дуга вырождается в короткий штрих.
+        //
+        // Переключение — двойной тап по компасу или по кнопке спуска.
         const HORIZON_R    = 115;
         const PATH_MIN_ALT = -18;                                  // глубже астрономических сумерек не рисуем
         const PATH_MAX_R   = HORIZON_R * (1 - PATH_MIN_ALT / 90);  // ≈138, деления начинаются с 148
         const PATH_MIN_R   = 10;
         const PATH_STEP_MS = 2 * 60 * 1000;                        // шаг выборки: 2 минуты ≈ 1 px дуги
 
+        let proMode = safeStorage.getItem('pro_mode') === '1';
+
         function altitudeToRadius(altitude) {
+            if (!proMode) return HORIZON_R;
             const r = HORIZON_R * (1 - altitude / 90);
             return Math.max(PATH_MIN_R, Math.min(PATH_MAX_R, r));
+        }
+
+        function setProMode(on) {
+            proMode = on;
+            safeStorage.setItem('pro_mode', on ? '1' : '0');
+            buildNumberEl.textContent = on ? `v${APP_VERSION} · ПРОФ` : `v${APP_VERSION}`;
+            updateCurrentSunPosition();
+            // Мишень уже стоящего замера пересаживаем на новый радиус, а не бросаем в воздухе
+            if (appState === STATE.LOCKED && targetAzimuth !== null && lockedAltitude !== null) {
+                setSvgDotPosition(targetSunDot, targetAzimuth, altitudeToRadius(lockedAltitude));
+            }
+        }
+
+        function toggleProMode() {
+            setProMode(!proMode);
         }
 
         // Опорные точки градиента вдоль траектории (по убыванию высоты).
@@ -942,7 +971,6 @@
 
         function renderSunPath(now) {
             sunPathGroup.textContent = '';
-            horizonMarksGroup.textContent = '';
             if (!sunPathSamples.length) return;
 
             const nowT = now.getTime();
@@ -986,27 +1014,6 @@
                 run.pts.push(xy);
             }
             flush();
-
-            renderHorizonMarks(now);
-        }
-
-        // Засечки восхода и захода поперёк линии горизонта.
-        function renderHorizonMarks(now) {
-            const times = window.SunCalc.getTimes(now, userLat, userLon);
-            [['sunrise', '255,154,60'], ['sunset', '255,107,53']].forEach(([key, rgb]) => {
-                const d = times[key];
-                if (!d || Number.isNaN(d.getTime())) return; // полярный день или полярная ночь
-                const az = getSolarPosition(d, userLat, userLon).azimuth;
-                const a = polar(az, HORIZON_R - 9);
-                const b = polar(az, HORIZON_R + 9);
-                const line = document.createElementNS(SVG_NS, 'line');
-                line.setAttribute('x1', a.x); line.setAttribute('y1', a.y);
-                line.setAttribute('x2', b.x); line.setAttribute('y2', b.y);
-                line.setAttribute('stroke', `rgba(${rgb},0.75)`);
-                line.setAttribute('stroke-width', '1.5');
-                line.setAttribute('stroke-linecap', 'round');
-                horizonMarksGroup.appendChild(line);
-            });
         }
 
         function formatClock(date) {
@@ -1050,7 +1057,10 @@
             renderSunPath(now);
 
             currentSunDot.style.display = 'block';
-            if (pos.altitude <= -6) currentSunDot.setAttribute('opacity', '0.4');
+            // Глубокой ночью точка уезжает за край нарисованной траектории — гасим её почти совсем,
+            // чтобы одинокий кружок не читался как ошибка
+            if (pos.altitude < PATH_MIN_ALT) currentSunDot.setAttribute('opacity', '0.18');
+            else if (pos.altitude <= -6) currentSunDot.setAttribute('opacity', '0.4');
             else if (pos.altitude < 0) currentSunDot.setAttribute('opacity', '0.75');
             else currentSunDot.setAttribute('opacity', '1');
             // Точка «сейчас» теперь живёт на самой траектории, а не на фиксированном радиусе
@@ -1150,6 +1160,7 @@
             stopChaosClock();
             setAppState(STATE.READY);
             targetAzimuth = null;
+            lockedAltitude = null;
             compassViewport.classList.remove('locked');
             targetSunDot.style.display = 'none';
             animatingSunDot.style.display = 'none';
@@ -1239,6 +1250,7 @@
                 // Мишень садится не на условный радиус 140, а туда, где солнце
                 // реально окажется по высоте — то есть точно на свою траекторию.
                 const targetAltitude = getSolarPosition(passageDate, userLat, userLon).altitude;
+                lockedAltitude = targetAltitude;
                 const finalR = altitudeToRadius(targetAltitude);
                 const startR = altitudeToRadius(currentSunAltitude);
 
@@ -1334,6 +1346,8 @@
         }
 
         // ==================== Инициализация и разрешения ====================
+        if (proMode) buildNumberEl.textContent = `v${APP_VERSION} · ПРОФ`;
+
         const onboardingDone = safeStorage.getItem('onboarding_done');
         if (!onboardingDone) {
             startOverlay.style.display = 'none';

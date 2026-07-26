@@ -9,7 +9,7 @@
  * CACHE_NAME обязан совпадать с APP_VERSION в index.html: смена версии
  * автоматически выбрасывает старый кэш в activate.
  */
-const CACHE_NAME = 'sun-compass-beta-v2.0.0';
+const CACHE_NAME = 'sun-compass-beta-v2.0.1';
 
 const PRECACHE = [
     './',
