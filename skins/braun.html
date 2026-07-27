@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+    <title>SN-01 — Солнечный компас</title>
+    <meta name="theme-color" content="#d8d3c9">
+
+    <!-- SunCalc 2.0.1 (MIT) — тот же блок, что в основном приложении -->
+    <script>
+        (function () {
+            'use strict';
+            var PI = Math.PI, sin = Math.sin, cos = Math.cos, tan = Math.tan, asin = Math.asin, atan2 = Math.atan2;
+            var rad = PI / 180, dayMs = 1000 * 60 * 60 * 24, J1970 = 2440588, J2000 = 2451545;
+            function toJulian(date) { return date.valueOf() / dayMs - 0.5 + J1970; }
+            function fromJulian(j) { return new Date((j + 0.5 - J1970) * dayMs); }
+            function toDays(date) { return toJulian(date) - J2000; }
+            var e = rad * 23.4397;
+            function rightAscension(l, b) { return atan2(sin(l) * cos(e) - tan(b) * sin(e), cos(l)); }
+            function declination(l, b) { return asin(sin(b) * cos(e) + cos(b) * sin(e) * sin(l)); }
+            function azimuth(H, phi, dec) { return atan2(sin(H), cos(H) * sin(phi) - tan(dec) * cos(phi)); }
+            function altitude(H, phi, dec) { return asin(sin(phi) * sin(dec) + cos(phi) * cos(dec) * cos(H)); }
+            function siderealTime(d, lw) { return rad * (280.16 + 360.9856235 * d) - lw; }
+            function solarMeanAnomaly(d) { return rad * (357.5291 + 0.98560028 * d); }
+            function eclipticLongitude(M) { var C = rad * (1.9148 * sin(M) + 0.02 * sin(2 * M) + 0.0003 * sin(3 * M)), P = rad * 102.9372; return M + C + P + PI; }
+            function sunCoords(d) { var M = solarMeanAnomaly(d), L = eclipticLongitude(M); return { dec: declination(L, 0), ra: rightAscension(L, 0) }; }
+            var SunCalc = {};
+            SunCalc.getPosition = function (date, lat, lng) {
+                var lw = rad * -lng, phi = rad * lat, d = toDays(date), c = sunCoords(d), H = siderealTime(d, lw) - c.ra;
+                return { azimuth: azimuth(H, phi, c.dec), altitude: altitude(H, phi, c.dec) };
+            };
+            var times = [[-0.833, 'sunrise', 'sunset'], [-0.3, 'sunriseEnd', 'sunsetStart'], [-6, 'dawn', 'dusk'], [-12, 'nauticalDawn', 'nauticalDusk'], [-18, 'nightEnd', 'night'], [6, 'goldenHourEnd', 'goldenHour']];
+            var J0 = 0.0009;
+            function julianCycle(d, lw) { return Math.round(d - J0 - lw / (2 * PI)); }
+            function approxTransit(Ht, lw, n) { return J0 + (Ht + lw) / (2 * PI) + n; }
+            function solarTransitJ(ds, M, L) { return J2000 + ds + 0.0053 * sin(M) - 0.0069 * sin(2 * L); }
+            function hourAngle(h, phi, d) { return Math.acos((sin(h) - sin(phi) * sin(d)) / (cos(phi) * cos(d))); }
+            function getSetJ(h, lw, phi, dec, n, M, L) { var w = hourAngle(h, phi, dec), a = approxTransit(w, lw, n); return solarTransitJ(a, M, L); }
+            SunCalc.getTimes = function (date, lat, lng) {
+                var lw = rad * -lng, phi = rad * lat, d = toDays(date), n = julianCycle(d, lw), ds = approxTransit(0, lw, n),
+                    M = solarMeanAnomaly(ds), L = eclipticLongitude(M), dec = declination(L, 0), Jnoon = solarTransitJ(ds, M, L),
+                    i, len, time, Jset, Jrise, result = { solarNoon: fromJulian(Jnoon), nadir: fromJulian(Jnoon - 0.5) };
+                for (i = 0, len = times.length; i < len; i += 1) {
+                    time = times[i]; Jset = getSetJ(time[0] * rad, lw, phi, dec, n, M, L); Jrise = Jnoon - (Jset - Jnoon);
+                    result[time[1]] = fromJulian(Jrise); result[time[2]] = fromJulian(Jset);
+                }
+                return result;
+            };
+            window.SunCalc = SunCalc;
+        }());
+    </script>
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            background-color: #d8d3c9;
+            background-image: linear-gradient(180deg, #e5dfd4 0%, #c4bcae 100%);
+            min-height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            color: #2A2A2A;
+            padding: 20px 16px;
+            gap: 14px;
+            -webkit-font-smoothing: antialiased;
+            user-select: none;
+            -webkit-user-select: none;
+            overflow: hidden;
+        }
+
+        .mode-label {
+            text-align: center;
+            font-size: 11px;
+            letter-spacing: 1.6px;
+            text-transform: uppercase;
+            color: #6a635a;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+        .mode-label span {
+            display: block;
+            font-size: 10px;
+            letter-spacing: 0.5px;
+            color: #9a938a;
+            margin-top: 3px;
+            text-transform: none;
+            font-weight: 400;
+        }
+
+        /* === Корпус === */
+        #sn01 {
+            background-color: #E6E3DC;
+            width: 330px;
+            height: 700px;
+            max-width: 94vw;
+            max-height: calc(100dvh - 70px);
+            border-radius: 16px;
+            padding: 30px 22px 30px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+            box-shadow:
+                inset 1px 2px 4px #FFFFFF,
+                inset -2px -3px 6px #C4C0B8,
+                12px 18px 36px rgba(0,0,0,0.18),
+                -6px -6px 16px rgba(255,255,255,0.4);
+        }
+
+        /* === Утопленный циферблат === */
+        .dial-housing {
+            width: 252px;
+            height: 252px;
+            max-width: 72vw;
+            max-height: 72vw;
+            border-radius: 50%;
+            background: #191919;
+            position: relative;
+            margin-bottom: 18px;
+            flex-shrink: 0;
+            cursor: pointer;
+            /* Утопленное отверстие, а не выпуклый шар: тень короткая, по всему периметру */
+            box-shadow:
+                inset 0 3px 7px rgba(0,0,0,0.75),
+                inset 0 -2px 5px rgba(255,255,255,0.06),
+                0 0 0 1px rgba(0,0,0,0.18),
+                0 1px 0 1px rgba(255,255,255,0.75);
+        }
+        .dial-housing svg { width: 100%; height: 100%; display: block; border-radius: 50%; }
+
+        /* Только кольцо с диодами и буквами вращается за компасом */
+        #dialRotor { transform-origin: 170px 170px; will-change: transform; }
+
+        @keyframes ledPulse { 0%, 100% { opacity: 0.84; } 50% { opacity: 1; } }
+        .led-active { animation: ledPulse 4s ease-in-out infinite; }
+
+        /* === Легенда === */
+        .legend {
+            width: 100%;
+            padding: 0 4px;
+            flex-grow: 1;
+            transition: opacity 0.35s ease;
+        }
+        #sn01.off .legend { opacity: 0; pointer-events: none; }
+
+        .legend-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 5px 2px;
+            font-size: 10px;
+            letter-spacing: 0.3px;
+            color: #333;
+        }
+        .legend-row + .legend-row { border-top: 1px solid rgba(0,0,0,0.06); }
+        .legend-left { display: flex; align-items: center; gap: 8px; font-weight: 500; text-transform: uppercase; }
+        .legend-left span:last-child { white-space: nowrap; }
+        .dot { width: 6px; height: 6px; border-radius: 1px; flex-shrink: 0; }
+        .legend-time { font-variant-numeric: tabular-nums; color: #666; font-size: 9.5px; letter-spacing: 0.2px; white-space: nowrap; }
+
+        /* === Одометр: светлые механические барабаны === */
+        .odometer {
+            display: flex;
+            gap: 4px;
+            background: #26241f;
+            padding: 5px;
+            border-radius: 5px;
+            box-shadow:
+                inset 2px 3px 6px rgba(0,0,0,0.75),
+                inset -1px -1px 2px rgba(255,255,255,0.18),
+                0 1px 1px rgba(255,255,255,0.8);
+            margin-bottom: 22px;
+            flex-shrink: 0;
+        }
+        .digit {
+            width: 27px;
+            height: 40px;
+            overflow: hidden;
+            position: relative;
+            border-radius: 2px;
+            background: #EFEDE7;
+            /* Цилиндр: блик сверху, тень снизу, тёмные грани по бокам */
+            box-shadow:
+                inset 1px 0 2px rgba(255,255,255,0.6),
+                inset -1px 0 2px rgba(0,0,0,0.18),
+                0 0 0 1px rgba(0,0,0,0.35);
+        }
+        .digit::before {
+            content: "";
+            position: absolute; left: 0; right: 0; top: 0; height: 30%;
+            background: linear-gradient(180deg, rgba(0,0,0,0.32), rgba(0,0,0,0.05) 70%, transparent);
+            z-index: 20; pointer-events: none;
+        }
+        .digit::after {
+            content: "";
+            position: absolute; left: 0; right: 0; bottom: 0; height: 26%;
+            background: linear-gradient(0deg, rgba(0,0,0,0.3), transparent);
+            z-index: 20; pointer-events: none;
+        }
+        .wheel {
+            position: absolute;
+            left: 0; top: 0; width: 100%;
+            will-change: transform;
+        }
+        .wheel div {
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 21px;
+            font-weight: 500;
+            color: #24211c;
+            font-variant-numeric: tabular-nums;
+        }
+        .separator-gap { width: 3px; }
+
+        /* === Кнопка === */
+        .button-recess {
+            width: 84px; height: 84px;
+            border-radius: 50%;
+            background: #DFDCD4;
+            display: flex; justify-content: center; align-items: center;
+            flex-shrink: 0;
+            box-shadow:
+                inset 3px 4px 8px rgba(0,0,0,0.25),
+                inset -2px -2px 6px rgba(255,255,255,0.8),
+                0 1px 2px rgba(255,255,255,0.6);
+        }
+        .aluminum-button {
+            width: 72px; height: 72px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            display: flex; justify-content: center; align-items: center;
+            background: linear-gradient(135deg, #A0A0A0 0%, #808080 50%, #686868 100%);
+            box-shadow:
+                2px 3px 6px rgba(0,0,0,0.4),
+                -1px -1px 2px rgba(255,255,255,0.15),
+                inset 1px 1px 2px rgba(255,255,255,0.35),
+                0 0 0 1px #444;
+            transition: transform 0.05s ease, box-shadow 0.05s ease;
+        }
+        .aluminum-button:active {
+            transform: scale(0.96);
+            box-shadow: 1px 1px 3px rgba(0,0,0,0.4), inset 3px 4px 8px rgba(0,0,0,0.35), 0 0 0 1px #444;
+        }
+        .led-indicator {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: #FFCA28;
+            box-shadow: 0 0 6px 1px rgba(255, 202, 40, 0.7), inset 1px 1px 2px rgba(0,0,0,0.4);
+            pointer-events: none;
+            transition: background 0.25s ease, box-shadow 0.25s ease;
+        }
+        /* Лампа на кнопке — индикатор питания, а не режима: горит всегда,
+           как на референсе. Режим виден по самому кольцу. */
+        /* Зоны гасит JS (перерисовкой кольца), а не прозрачность:
+           иначе половина диодов остаётся цветной, а половина уходит в ноль */
+        #ledRing circle { transition: fill 0.35s ease, opacity 0.35s ease; }
+        #beaconLayer { transition: opacity 0.3s ease; }
+
+        /* Экран разрешений */
+        .start-overlay {
+            position: fixed; inset: 0; z-index: 100;
+            background: linear-gradient(180deg, #e5dfd4 0%, #c4bcae 100%);
+            display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+            transition: opacity 0.4s ease;
+            text-align: center; padding: 24px;
+        }
+        .start-overlay.hidden { opacity: 0; pointer-events: none; }
+        .start-overlay p { font-size: 12px; color: #6a635a; letter-spacing: 0.4px; max-width: 240px; line-height: 1.5; }
+        .start-btn {
+            font: inherit; font-size: 11px; font-weight: 600; letter-spacing: 1.4px; text-transform: uppercase;
+            color: #3a352e; background: #E6E3DC; border: none; cursor: pointer;
+            padding: 14px 28px; border-radius: 8px;
+            box-shadow: inset 1px 1px 2px #fff, inset -1px -1px 3px #c4c0b8, 3px 4px 10px rgba(0,0,0,0.18);
+        }
+        .start-btn:active { box-shadow: inset 2px 3px 6px rgba(0,0,0,0.22); }
+
+        .footer-note {
+            font-size: 9px; letter-spacing: 0.6px; color: #9a938a;
+            position: absolute; bottom: 10px; left: 0; right: 0; text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="start-overlay" id="startOverlay">
+        <p>Держите прибор горизонтально, экраном вверх.<br>Верхний торец — направление визирования.</p>
+        <button class="start-btn" id="startBtn">Включить</button>
+    </div>
+
+    <div class="mode-label" id="modeLabel">
+        РЕЖИМ ВКЛЮЧЕН
+        <span>зоны дня на траектории солнца</span>
+    </div>
+
+    <div id="sn01">
+        <div class="dial-housing" id="dialHousing">
+            <svg viewBox="0 0 340 340" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <radialGradient id="dialGradient">
+                        <stop offset="0%" stop-color="#242424"/>
+                        <stop offset="100%" stop-color="#121212"/>
+                    </radialGradient>
+                </defs>
+
+                <circle cx="170" cy="170" r="166" fill="url(#dialGradient)"/>
+
+                <!-- Всё, что живёт в азимутальных координатах, вращается вместе -->
+                <g id="dialRotor">
+                    <g id="cardinalTicks"></g>
+                    <g id="lettersGroup"></g>
+                    <g id="ledRing"></g>
+                    <g id="beaconLayer"></g>
+                    <g id="sunLayer"></g>
+                </g>
+
+                <!-- Стрелка неподвижна: это визирная линия, а не магнитная стрелка -->
+                <g id="needleLayer" filter="drop-shadow(2px 3px 4px rgba(0,0,0,0.7))">
+                    <line x1="170" y1="170" x2="170" y2="84" stroke="#ECECEC" stroke-width="2.4" stroke-linecap="round"/>
+                    <line x1="170" y1="170" x2="170" y2="246" stroke="#787878" stroke-width="2.4" stroke-linecap="round"/>
+                    <circle cx="170" cy="170" r="8.5" fill="#9D9D9D"/>
+                    <circle cx="170" cy="170" r="5.5" fill="#CFCFCF"/>
+                    <circle cx="170" cy="170" r="2.2" fill="#F2F2F2"/>
+                    <circle cx="170" cy="246" r="5.5" fill="#9C9C9C"/>
+                </g>
+            </svg>
+        </div>
+
+        <div class="legend" id="legend"></div>
+
+        <div class="odometer" id="odometer">
+            <div class="digit"><div class="wheel"></div></div>
+            <div class="digit"><div class="wheel"></div></div>
+            <div class="digit"><div class="wheel"></div></div>
+            <div class="digit"><div class="wheel"></div></div>
+        </div>
+
+        <div class="button-recess">
+            <button class="aluminum-button" id="powerBtn" aria-label="Режим зон">
+                <div class="led-indicator"></div>
+            </button>
+        </div>
+
+        <div class="footer-note" id="footerNote">SN-01</div>
+    </div>
+
+<script>
+/* ============================================================================
+ * ДВИЖОК — общая часть со «Солнечным компасом» (index.html).
+ * Скины отличаются только отрисовкой; всё ниже до пометки «СКИН» одинаково.
+ * ========================================================================== */
+
+const memoryStorage = {};
+const safeStorage = (() => {
+    try {
+        localStorage.setItem('__t__', '1'); localStorage.removeItem('__t__');
+        return localStorage;
+    } catch (e) {
+        return { getItem: k => memoryStorage[k] ?? null, setItem: (k, v) => { memoryStorage[k] = v; } };
+    }
+})();
+
+function normalizeAngle(a) { return ((a % 360) + 360) % 360; }
+
+function getSolarPosition(date, lat, lon) {
+    if (lat === null || lon === null) return { azimuth: 0, altitude: -90 };
+    const pos = window.SunCalc.getPosition(date, lat, lon);
+    return { azimuth: (pos.azimuth * 180 / Math.PI + 180) % 360, altitude: pos.altitude * 180 / Math.PI };
+}
+
+function unwrapAzimuth(az, base) {
+    let res = az;
+    while (res - base > 180) res -= 360;
+    while (res - base < -180) res += 360;
+    return res;
+}
+
+// Пороги высоты солнца. Названия и цвета — скиновские, границы общие.
+const SUN_PHASES = [
+    { minAlt: 6,         key: 'day',    name: 'День' },
+    { minAlt: 0,         key: 'gold',   name: 'Золотой час' },
+    { minAlt: -0.833,    key: 'sunset', name: 'Закат', nameMorning: 'Восход' },
+    { minAlt: -6,        key: 'blue',   name: 'Синий час' },
+    { minAlt: -Infinity, key: 'night',  name: 'Ночь' }
+];
+
+function phaseFor(altitude, isMorning) {
+    for (const p of SUN_PHASES) {
+        if (altitude >= p.minAlt) {
+            return { key: p.key, name: (isMorning && p.nameMorning) ? p.nameMorning : p.name };
+        }
+    }
+    return SUN_PHASES[SUN_PHASES.length - 1];
+}
+
+const SEARCH_MIN_ALTITUDE = -6;
+
+// Обратная задача: по азимуту найти ближайший момент, когда солнце там будет.
+function findSolarPassage(targetAz, lat, lon) {
+    const AZ_TOLERANCE = 0.5;
+    const t = Date.now();
+    const d1 = new Date(), d2 = new Date(), dMid = new Date();
+
+    for (let i = 0; i < 365 * 24; i++) {
+        const t1 = t + i * 3600000, t2 = t1 + 3600000;
+        d1.setTime(t1); d2.setTime(t2);
+        const az1 = getSolarPosition(d1, lat, lon).azimuth;
+        const az2 = getSolarPosition(d2, lat, lon).azimuth;
+        const uAz2 = unwrapAzimuth(az2, az1);
+        const uTarget = unwrapAzimuth(targetAz, az1);
+
+        if (uTarget >= Math.min(az1, uAz2) && uTarget <= Math.max(az1, uAz2)) {
+            const dir = Math.sign(uAz2 - az1);
+            if (dir === 0) continue;
+            let left = t1, right = t2;
+            for (let s = 0; s < 20; s++) {
+                const mid = (left + right) / 2;
+                dMid.setTime(mid);
+                const uMid = unwrapAzimuth(getSolarPosition(dMid, lat, lon).azimuth, az1);
+                if (dir > 0 ? uMid > uTarget : uMid < uTarget) right = mid; else left = mid;
+            }
+            const candidate = new Date((left + right) / 2);
+            const cp = getSolarPosition(candidate, lat, lon);
+            if (cp.altitude >= SEARCH_MIN_ALTITUDE &&
+                Math.abs(unwrapAzimuth(cp.azimuth, targetAz) - targetAz) < AZ_TOLERANCE) {
+                return candidate;
+            }
+        }
+    }
+    return null;
+}
+
+const PATH_STEP_MS = 2 * 60 * 1000;
+
+// Сутки от местной полуночи до следующей — через setDate, чтобы переводы часов не ломали длину
+function buildSunPathSamples(lat, lon, now) {
+    const start = new Date(now); start.setHours(0, 0, 0, 0);
+    const end = new Date(start); end.setDate(end.getDate() + 1);
+    const probe = new Date();
+    const out = [];
+    for (let t = start.getTime(); t <= end.getTime(); t += PATH_STEP_MS) {
+        probe.setTime(t);
+        const p = getSolarPosition(probe, lat, lon);
+        out.push({ t, az: p.azimuth, alt: p.altitude });
+    }
+    return out;
+}
+
+function formatClock(d) {
+    if (!d || Number.isNaN(d.getTime())) return '—:—';
+    return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+// Таблица зон дня. Времена — из событий SunCalc, а не из порогов SUN_PHASES:
+// золотой час в таблице начинается от видимого восхода (−0.833°), раскраска ведёт его от 0°.
+function buildZones(now, lat, lon) {
+    const t = window.SunCalc.getTimes(now, lat, lon);
+    const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
+    const t2 = window.SunCalc.getTimes(tomorrow, lat, lon);
+    return [
+        { name: 'Золотой час (AM)', key: 'gold',   from: t.sunrise,       to: t.goldenHourEnd },
+        { name: 'Восход',           key: 'rise',   at:   t.sunrise },
+        { name: 'День',             key: 'day',    from: t.goldenHourEnd, to: t.goldenHour },
+        { name: 'Золотой час (PM)', key: 'gold',   from: t.goldenHour,    to: t.sunset },
+        { name: 'Закат',            key: 'sunset', at:   t.sunset },
+        { name: 'Синий час',        key: 'blue',   from: t.sunset,        to: t.dusk },
+        { name: 'Ночь',             key: 'night',  from: t.dusk,          to: t2.sunrise }
+    ];
+}
+
+/* ============================================================================
+ * СКИН BRAUN (SN-01) — дискретная светодиодная шкала
+ * ========================================================================== */
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const CENTER = 170;
+
+const LED_COUNT = 120;              // 3° на диод — шаг шкалы прибора
+const LED_STEP = 360 / LED_COUNT;
+const LED_RADIUS = 116;
+const LETTER_RADIUS = 137;
+const TICK_INNER = 149, TICK_OUTER = 159;
+
+const COLORS = {
+    day:    '#ECECEC',
+    gold:   '#F4C84C',
+    sunset: '#C56B3A',
+    blue:   '#4B76C8',
+    night:  '#555555',
+    rise:   '#ECECEC',
+    off:    'rgba(255,255,255,0.30)'   // погашенный диод: виден как накатанная шкала
+};
+
+// День занимает большую часть кольца, поэтому светит вполсилы:
+// золотой час, закат и синий час должны читаться первыми
+const PHASE_OPACITY = { day: 0.45, gold: 0.98, sunset: 0.98, blue: 0.92, night: 0.3 };
+
+// Чем «дороже» фаза, тем выше приоритет: на один диод попадает несколько выборок,
+// и золотой час не должен затираться днём
+const PHASE_PRIORITY = { night: 0, day: 1, blue: 2, gold: 3, sunset: 4 };
+
+const dialHousing = document.getElementById('dialHousing');
+const dialRotor = document.getElementById('dialRotor');
+const ledRing = document.getElementById('ledRing');
+const beaconLayer = document.getElementById('beaconLayer');
+const sunLayer = document.getElementById('sunLayer');
+const legendEl = document.getElementById('legend');
+const powerBtn = document.getElementById('powerBtn');
+const modeLabel = document.getElementById('modeLabel');
+const device = document.getElementById('sn01');
+const footerNote = document.getElementById('footerNote');
+const startOverlay = document.getElementById('startOverlay');
+const startBtn = document.getElementById('startBtn');
+
+// --- Риски и буквы сторон света -------------------------------------------
+const cardinals = [
+    { letter: 'N', angle: 0,   color: '#E8C84D', tick: 'rgba(232,200,77,0.85)' },
+    { letter: 'E', angle: 90,  color: 'rgba(255,255,255,0.38)', tick: 'rgba(255,255,255,0.35)' },
+    { letter: 'S', angle: 180, color: 'rgba(255,255,255,0.38)', tick: 'rgba(255,255,255,0.35)' },
+    { letter: 'W', angle: 270, color: 'rgba(255,255,255,0.38)', tick: 'rgba(255,255,255,0.35)' }
+];
+
+(function drawCardinals() {
+    const ticks = document.getElementById('cardinalTicks');
+    const letters = document.getElementById('lettersGroup');
+    for (const c of cardinals) {
+        const rad = (c.angle - 90) * Math.PI / 180;
+        const cosr = Math.cos(rad), sinr = Math.sin(rad);
+
+        const line = document.createElementNS(SVG_NS, 'line');
+        line.setAttribute('x1', (CENTER + TICK_INNER * cosr).toFixed(2));
+        line.setAttribute('y1', (CENTER + TICK_INNER * sinr).toFixed(2));
+        line.setAttribute('x2', (CENTER + TICK_OUTER * cosr).toFixed(2));
+        line.setAttribute('y2', (CENTER + TICK_OUTER * sinr).toFixed(2));
+        line.setAttribute('stroke', c.tick);
+        line.setAttribute('stroke-width', '2');
+        line.setAttribute('stroke-linecap', 'round');
+        ticks.appendChild(line);
+
+        const x = CENTER + LETTER_RADIUS * cosr;
+        const y = CENTER + LETTER_RADIUS * sinr;
+        const text = document.createElementNS(SVG_NS, 'text');
+        text.setAttribute('x', x.toFixed(2));
+        text.setAttribute('y', y.toFixed(2));
+        text.setAttribute('fill', c.color);
+        text.setAttribute('font-size', '17');
+        text.setAttribute('font-weight', '500');
+        text.setAttribute('letter-spacing', '0.8');
+        text.setAttribute('text-anchor', 'middle');
+        text.setAttribute('dominant-baseline', 'central');
+        text.setAttribute('font-family', "'Helvetica Neue', Helvetica, Arial, sans-serif");
+        text.textContent = c.letter;
+        letters.appendChild(text);
+    }
+})();
+
+// --- Светодиодная гирлянда --------------------------------------------------
+const leds = [];
+(function buildLeds() {
+    for (let i = 0; i < LED_COUNT; i++) {
+        const angle = i * LED_STEP;
+        const rad = (angle - 90) * Math.PI / 180;
+        const x = CENTER + LED_RADIUS * Math.cos(rad);
+        const y = CENTER + LED_RADIUS * Math.sin(rad);
+
+        const led = document.createElementNS(SVG_NS, 'circle');
+        led.setAttribute('cx', x.toFixed(2));
+        led.setAttribute('cy', y.toFixed(2));
+        led.setAttribute('r', '1.9');
+        led.setAttribute('fill', COLORS.off);
+        ledRing.appendChild(led);
+        leds.push(led);
+    }
+})();
+
+function clearRing() {
+    for (const led of leds) {
+        led.setAttribute('fill', COLORS.off);
+        led.setAttribute('opacity', '1');
+        led.classList.remove('led-active', 'led-lit');
+        led.style.animationDelay = '0s';
+    }
+    beaconLayer.textContent = '';
+}
+
+function lightLed(index, key) {
+    const led = leds[((index % LED_COUNT) + LED_COUNT) % LED_COUNT];
+    const prev = led.dataset.phase;
+    if (prev && PHASE_PRIORITY[prev] >= PHASE_PRIORITY[key]) return;
+    led.dataset.phase = key;
+    led.setAttribute('fill', COLORS[key]);
+    led.setAttribute('opacity', String(PHASE_OPACITY[key] ?? 0.9));
+    led.classList.add('led-active', 'led-lit');
+    led.style.animationDuration = `${3 + Math.random() * 4}s`;
+    led.style.animationDelay = `${Math.random() * 3}s`;
+}
+
+// Восход и заход — те же диоды, только крупнее: ритм кольца не нарушается
+function addBeacon(azimuth, color) {
+    const rad = (azimuth - 90) * Math.PI / 180;
+    const b = document.createElementNS(SVG_NS, 'circle');
+    b.setAttribute('cx', (CENTER + LED_RADIUS * Math.cos(rad)).toFixed(2));
+    b.setAttribute('cy', (CENTER + LED_RADIUS * Math.sin(rad)).toFixed(2));
+    b.setAttribute('r', '3.4');
+    b.setAttribute('fill', color);
+    b.setAttribute('stroke', '#191919');
+    b.setAttribute('stroke-width', '0.9');
+    beaconLayer.appendChild(b);
+}
+
+function renderSunDot(azimuth, altitude) {
+    sunLayer.textContent = '';
+    const rad = (azimuth - 90) * Math.PI / 180;
+    const x = CENTER + LED_RADIUS * Math.cos(rad);
+    const y = CENTER + LED_RADIUS * Math.sin(rad);
+    const dim = altitude < -6 ? 0.35 : 1;
+    // Белая лампа с тёплым ореолом, а не жёлтый шарик: солнце «сейчас» должно
+    // отличаться от золотого часа на кольце
+    const spec = [[8.5, '#FFD95A', 0.16 * dim], [4.6, '#FFF6DC', 0.55 * dim], [2.6, '#FFFFFF', dim]];
+    for (const [r, fill, op] of spec) {
+        const c = document.createElementNS(SVG_NS, 'circle');
+        c.setAttribute('cx', x.toFixed(2)); c.setAttribute('cy', y.toFixed(2));
+        c.setAttribute('r', r); c.setAttribute('fill', fill);
+        c.setAttribute('opacity', op.toFixed(2));
+        sunLayer.appendChild(c);
+    }
+}
+
+function renderTarget(azimuth) {
+    const rad = (azimuth - 90) * Math.PI / 180;
+    const x = CENTER + LED_RADIUS * Math.cos(rad);
+    const y = CENTER + LED_RADIUS * Math.sin(rad);
+    const ring = document.createElementNS(SVG_NS, 'circle');
+    ring.setAttribute('cx', x.toFixed(2)); ring.setAttribute('cy', y.toFixed(2));
+    ring.setAttribute('r', '7.5');
+    ring.setAttribute('fill', 'none');
+    ring.setAttribute('stroke', '#FFCA28');
+    ring.setAttribute('stroke-width', '1.6');
+    sunLayer.appendChild(ring);
+}
+
+// --- Одометр ----------------------------------------------------------------
+const DIGIT_H = 40;                 // высота окна барабана, px — совпадает с .digit
+const TOTAL_SECTIONS = 60;
+const wheels = [...document.querySelectorAll('.wheel')];
+const cascadeDelay = [0, 80, 160, 240];
+let previousDigits = [0, 0, 0, 0];
+let rotations = [0, 0, 0, 0];
+let clockReady = false;
+
+wheels.forEach(w => {
+    for (let i = 0; i < TOTAL_SECTIONS * 10; i++) {
+        const d = document.createElement('div');
+        d.textContent = i % 10;
+        w.appendChild(d);
+    }
+});
+
+function setOdometer(timeStr, immediate = false) {
+    const digits = timeStr.replace(':', '').split('').map(Number);
+    if (digits.length !== 4 || digits.some(Number.isNaN)) return;
+
+    digits.forEach((target, i) => {
+        const wheel = wheels[i];
+        if (!clockReady || immediate) {
+            rotations[i] = (TOTAL_SECTIONS / 2) * 10 + target;
+            wheel.style.transition = 'none';
+            wheel.style.transform = `translateY(${-rotations[i] * DIGIT_H}px)`;
+            previousDigits[i] = target;
+            requestAnimationFrame(() => { wheel.style.transition = ''; });
+            return;
+        }
+        if (target === previousDigits[i]) return;
+
+        let diff = target - previousDigits[i];
+        if (diff < 0) diff += 10;           // барабан всегда крутится вперёд
+        rotations[i] += diff;
+
+        const duration = 0.45 + diff * 0.12;
+        wheel.style.transition = `transform ${duration}s cubic-bezier(0.25, 0.8, 0.25, 1)`;
+        wheel.style.transitionDelay = `${cascadeDelay[i]}ms`;
+        wheel.style.transform = `translateY(${-rotations[i] * DIGIT_H}px)`;
+        previousDigits[i] = target;
+
+        // Лента конечная — незаметно возвращаем её в середину
+        const mid = (TOTAL_SECTIONS / 2) * 10;
+        if (Math.abs(rotations[i] - mid) > (TOTAL_SECTIONS / 2 - 5) * 10) {
+            setTimeout(() => {
+                rotations[i] = mid + target;
+                wheel.style.transition = 'none';
+                wheel.style.transform = `translateY(${-rotations[i] * DIGIT_H}px)`;
+                requestAnimationFrame(() => { wheel.style.transition = ''; });
+            }, duration * 1000 + cascadeDelay[i] + 50);
+        }
+    });
+    clockReady = true;
+}
+
+// --- Легенда ----------------------------------------------------------------
+function renderLegend(now) {
+    legendEl.textContent = '';
+    for (const z of buildZones(now, userLat, userLon)) {
+        const row = document.createElement('div');
+        row.className = 'legend-row';
+
+        const left = document.createElement('div');
+        left.className = 'legend-left';
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        dot.style.background = COLORS[z.key] || COLORS.day;
+        if (z.key === 'rise' || z.key === 'day') dot.style.boxShadow = 'inset 0 0 0 1px #888';
+        const name = document.createElement('span');
+        name.textContent = z.name;
+        left.append(dot, name);
+
+        const time = document.createElement('div');
+        time.className = 'legend-time';
+        time.textContent = z.at ? formatClock(z.at) : `${formatClock(z.from)} – ${formatClock(z.to)}`;
+
+        row.append(left, time);
+        legendEl.appendChild(row);
+    }
+}
+
+// --- Состояние --------------------------------------------------------------
+const STATE = { IDLE: 'idle', READY: 'ready', CALCULATING: 'calculating', LOCKED: 'locked' };
+let appState = STATE.IDLE;
+let userLat = null, userLon = null;
+let realHeading = 0, visualHeading = 0;
+let currentSunAzimuth = 0, currentSunAltitude = 0;
+let sunPathSamples = [], sunPathKey = null;
+let zonesOn = safeStorage.getItem('sn01_zones') !== '0';
+let clockTimerId = null;
+
+function setZonesOn(on) {
+    zonesOn = on;
+    safeStorage.setItem('sn01_zones', on ? '1' : '0');
+    device.classList.toggle('off', !on);
+    modeLabel.innerHTML = on
+        ? 'РЕЖИМ ВКЛЮЧЕН<span>зоны дня на траектории солнца</span>'
+        : 'РЕЖИМ ОТКЛЮЧЕН<span>обычный вид</span>';
+    if (userLat !== null) updateSolarDisplay();
+}
+
+// --- Компас -----------------------------------------------------------------
+function smoothAngle(target, current) {
+    let diff = target - current;
+    while (diff > 180) diff -= 360;
+    while (diff < -180) diff += 360;
+    return current + diff * 0.15;
+}
+
+function renderCompass() {
+    if (appState !== STATE.LOCKED) {
+        visualHeading = smoothAngle(realHeading, visualHeading);
+        dialRotor.setAttribute('transform', `rotate(${(-visualHeading).toFixed(2)} 170 170)`);
+    }
+    requestAnimationFrame(renderCompass);
+}
+renderCompass();
+
+function handleOrientation(e) {
+    let heading = null;
+    if (typeof e.webkitCompassHeading === 'number' && !Number.isNaN(e.webkitCompassHeading)) {
+        heading = e.webkitCompassHeading;
+    } else if (typeof e.alpha === 'number' && !Number.isNaN(e.alpha)) {
+        const screenAngle = (screen.orientation && typeof screen.orientation.angle === 'number')
+            ? screen.orientation.angle
+            : (typeof window.orientation === 'number' ? window.orientation : 0);
+        heading = 360 - e.alpha + screenAngle;
+    }
+    if (heading !== null && appState !== STATE.LOCKED) realHeading = normalizeAngle(heading);
+}
+
+// --- Обновление показаний ----------------------------------------------------
+function updateSolarDisplay() {
+    if (userLat === null) return;
+    const now = new Date();
+
+    const key = `${now.toDateString()}|${userLat.toFixed(3)}|${userLon.toFixed(3)}`;
+    if (key !== sunPathKey) {
+        sunPathKey = key;
+        sunPathSamples = buildSunPathSamples(userLat, userLon, now);
+    }
+
+    clearRing();
+    for (const led of leds) delete led.dataset.phase;
+
+    const times = window.SunCalc.getTimes(now, userLat, userLon);
+
+    // Выключенный режим — просто накатанная шкала: диоды одинаковые, зон нет
+    if (zonesOn) {
+        const noon = times.solarNoon;
+        for (const s of sunPathSamples) {
+            const isMorning = noon && !Number.isNaN(noon.getTime()) ? s.t < noon.getTime() : false;
+            lightLed(Math.round(s.az / LED_STEP), phaseFor(s.alt, isMorning).key);
+        }
+        for (const [k, color] of [['sunrise', COLORS.rise], ['sunset', COLORS.sunset]]) {
+            const d = times[k];
+            if (d && !Number.isNaN(d.getTime())) addBeacon(getSolarPosition(d, userLat, userLon).azimuth, color);
+        }
+    }
+
+    const pos = getSolarPosition(now, userLat, userLon);
+    currentSunAzimuth = pos.azimuth;
+    currentSunAltitude = pos.altitude;
+    renderSunDot(pos.azimuth, pos.altitude);
+    if (appState === STATE.LOCKED && lockedAzimuth !== null) renderTarget(lockedAzimuth);
+
+    renderLegend(now);
+}
+
+function tickClock() {
+    if (appState === STATE.READY) setOdometer(formatClock(new Date()));
+    const now = new Date();
+    clockTimerId = setTimeout(tickClock, 60000 - (now.getSeconds() * 1000 + now.getMilliseconds()));
+}
+
+// --- Замер ------------------------------------------------------------------
+let lockedAzimuth = null;
+let searchTimerId = null;
+
+function doMeasure() {
+    if (appState !== STATE.READY || userLat === null) return;
+    appState = STATE.CALCULATING;
+    lockedAzimuth = normalizeAngle(realHeading);
+    footerNote.textContent = `АЗИМУТ ${Math.round(lockedAzimuth)}°  ·  ПОИСК…`;
+
+    searchTimerId = setTimeout(() => {
+        const passage = findSolarPassage(lockedAzimuth, userLat, userLon);
+        appState = STATE.LOCKED;
+        if (!passage) {
+            footerNote.textContent = `АЗИМУТ ${Math.round(lockedAzimuth)}°  ·  НЕ ОСВЕЩАЕТСЯ`;
+            return;
+        }
+        const alt = getSolarPosition(passage, userLat, userLon).altitude;
+        const dTarget = new Date(passage); dTarget.setHours(0, 0, 0, 0);
+        const dNow = new Date(); dNow.setHours(0, 0, 0, 0);
+        const days = Math.round((dTarget - dNow) / 86400000);
+        const when = days === 0 ? 'СЕГОДНЯ' : days === 1 ? 'ЗАВТРА'
+            : passage.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }).toUpperCase();
+
+        setOdometer(formatClock(passage));
+        renderTarget(lockedAzimuth);
+        footerNote.textContent = `${when}  ·  ${phaseFor(alt, false).name.toUpperCase()}  ·  ${Math.round(alt)}°`;
+    }, 60);
+}
+
+function resetMeasure() {
+    clearTimeout(searchTimerId);
+    appState = STATE.READY;
+    lockedAzimuth = null;
+    footerNote.textContent = 'SN-01';
+    setOdometer(formatClock(new Date()));
+    updateSolarDisplay();
+}
+
+dialHousing.addEventListener('click', () => {
+    if (appState === STATE.LOCKED) resetMeasure();
+    else if (appState === STATE.READY) doMeasure();
+});
+
+powerBtn.addEventListener('click', () => setZonesOn(!zonesOn));
+
+// --- Запуск ------------------------------------------------------------------
+setZonesOn(zonesOn);
+setOdometer(formatClock(new Date()), true);
+
+startBtn.addEventListener('click', async () => {
+    startBtn.textContent = 'Подключение…';
+    startBtn.style.pointerEvents = 'none';
+
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        try {
+            const state = await DeviceOrientationEvent.requestPermission();
+            if (state === 'granted') window.addEventListener('deviceorientation', handleOrientation, true);
+        } catch (e) { /* без датчиков прибор всё равно показывает солнце */ }
+    } else {
+        window.addEventListener('deviceorientation', handleOrientation, true);
+    }
+
+    const go = (lat, lon, label) => {
+        userLat = lat; userLon = lon;
+        if (label) footerNote.textContent = label;
+        appState = STATE.READY;
+        startOverlay.classList.add('hidden');
+        updateSolarDisplay();
+        setOdometer(formatClock(new Date()), true);
+        tickClock();
+        setInterval(updateSolarDisplay, 60000);
+    };
+
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            p => go(p.coords.latitude, p.coords.longitude, 'SN-01'),
+            () => go(55.7558, 37.6173, 'SN-01 · ДЕМО'),
+            { enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 }
+        );
+    } else {
+        go(55.7558, 37.6173, 'SN-01 · ДЕМО');
+    }
+});
+
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && appState !== STATE.IDLE) {
+        updateSolarDisplay();
+        if (appState === STATE.READY) { clearTimeout(clockTimerId); tickClock(); }
+    }
+});
+</script>
+</body>
+</html>
