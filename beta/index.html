@@ -475,6 +475,45 @@
             line-height: 1.5;
         }
         .onboarding-card p { margin-bottom: 20px; }
+
+        /* ===== Первый вход в витрину скинов =====
+           Прибор «ломается» и гаснет как кинескоп. Ровно один раз:
+           дальше пятый тап открывает витрину сразу. */
+        @keyframes instrumentShake {
+            0%, 100% { transform: translate(0, 0) skewX(0deg); }
+            20% { transform: translate(-3px, 2px) skewX(0.6deg); filter: hue-rotate(18deg); }
+            45% { transform: translate(2px, -2px) skewX(-0.5deg); }
+            70% { transform: translate(-2px, -1px) skewX(0.4deg); filter: contrast(140%); }
+        }
+        body.rebooting .compass-viewport { animation: instrumentShake 0.17s infinite; }
+        body.rebooting .display-header { animation: instrumentShake 0.23s infinite reverse; }
+        body.rebooting .date-label { color: var(--accent-sun); }
+
+        .glitch-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 300;
+            background: var(--bg);
+            opacity: 0;
+            pointer-events: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .glitch-overlay.on { opacity: 1; pointer-events: auto; transition: opacity 0.16s ease; }
+
+        .crt-line {
+            width: 0;
+            height: 2px;
+            background: #ffffff;
+            box-shadow: 0 0 18px 4px rgba(255, 255, 255, 0.85);
+        }
+        .glitch-overlay.on .crt-line { animation: crtLine 0.6s cubic-bezier(0.23, 1, 0.32, 1) forwards; }
+        @keyframes crtLine {
+            0%   { width: 84vw; opacity: 1; }
+            65%  { width: 84vw; opacity: 1; }
+            100% { width: 0; opacity: 0; }
+        }
     </style>
 </head>
 <body>
@@ -536,6 +575,8 @@
 
     <!-- Легенда зон дня: выезжает по тапу на строку состояния, только в скрытом режиме -->
     <div class="zone-legend" id="zoneLegend" aria-hidden="true"></div>
+
+    <div class="glitch-overlay" id="glitchOverlay"><div class="crt-line"></div></div>
 
     <div class="build-number" id="buildNumber"></div>
 
@@ -624,6 +665,7 @@
         const sunStatus = document.getElementById('sunStatus');
         const sunPathGroup = document.getElementById('sunPathGroup');
         const zoneLegend = document.getElementById('zoneLegend');
+        const glitchOverlay = document.getElementById('glitchOverlay');
         const compassSvg = document.getElementById('compassSvg');
         const compassViewport = document.getElementById('compassViewport');
         const currentSunDot = document.getElementById('currentSunDot');
@@ -847,34 +889,73 @@
             else enterZoomMode();
         }
 
-        // Детектор тапов: одиночный — замер/сброс, двойной — скрытый режим, тройной — zoom.
-        // Счётчик у каждой цели свой, чтобы тап по компасу и тап по кнопке не складывались.
-        const TAP_WINDOW_MS = 300;
+        // ==================== Лестница тапов ====================
+        //   1 — замер, повторно сброс
+        //   3 — увеличение
+        //   4 — инженерный режим
+        //   5 — витрина скинов (в первый раз через «поломку» прибора)
+        //
+        // Два тапа намеренно пусты: это ступенька, на которой ничего не происходит,
+        // и именно она заставляет пробовать дальше.
+        //
+        // Раньше тройной срабатывал сразу по третьему касанию. Теперь ждать приходится
+        // всем: иначе до четвёртого и пятого просто не дотапать.
+        const TAP_WINDOW_MS = 320;
+
+        const TAP_ACTIONS = {
+            1: () => toggleLock(),
+            3: () => toggleZoomMode(),
+            4: () => toggleEngineerMode(),
+            5: () => openSkins()
+        };
 
         function makeTapHandler() {
             let count = 0;
             let timer = null;
             return function () {
+                if (isRebooting) return;
                 count++;
                 clearTimeout(timer);
-
-                // Тройной срабатывает сразу: ждать нечего, больше вариантов нет
-                if (count === 3) {
-                    count = 0;
-                    toggleZoomMode();
-                    return;
-                }
-
                 timer = setTimeout(() => {
-                    if (count === 1) toggleLock();
-                    else if (count === 2) toggleHiddenMode();
+                    // Больше пяти — всё равно витрина: перестарался, не сломал
+                    const action = TAP_ACTIONS[Math.min(count, 5)];
                     count = 0;
+                    if (action) action();
                 }, TAP_WINDOW_MS);
             };
         }
 
         const handleCompassTap = makeTapHandler();
         const handleShutterTap = makeTapHandler();
+
+        // ==================== Витрина скинов ====================
+        // В бете путь переписывается на '../skins/' — витрина лежит рядом с приложением,
+        // а не внутри него.
+        const SKINS_URL = '../skins/';
+        let isRebooting = false;
+
+        // Первый раз прибор «ломается» и перезагружается — так пятый тап читается
+        // как найденная поломка, а не как пункт меню. Дальше открывается сразу.
+        function openSkins() {
+            if (isRebooting) return;
+            if (safeStorage.getItem('skins_seen') === '1') {
+                location.href = SKINS_URL;
+                return;
+            }
+            safeStorage.setItem('skins_seen', '1');
+
+            isRebooting = true;
+            exitZoomMode();
+            closeZoneLegend();
+            dateLabel.textContent = 'СБОЙ ПРИБОРА';
+            document.body.classList.add('rebooting');
+            startChaosClock();
+
+            setTimeout(() => {
+                glitchOverlay.classList.add('on');
+                setTimeout(() => { location.href = SKINS_URL; }, 640);
+            }, 1250);
+        }
 
         // Обновление смещения при смене ориентации экрана
         window.addEventListener('resize', () => {
@@ -936,7 +1017,7 @@
             return SUN_PHASES[SUN_PHASES.length - 1];
         }
 
-        // ==================== Скрытый режим ====================
+        // ==================== Инженерный режим ====================
         // Пасхалка, а не тир функций. По умолчанию прибор ничего лишнего не показывает:
         // шкала, белая точка солнца сейчас, золотая точка замера — и всё.
         //
@@ -952,23 +1033,23 @@
         const PATH_MIN_R   = 10;
         const PATH_STEP_MS = 2 * 60 * 1000;                        // шаг выборки: 2 минуты ≈ 1 px дуги
 
-        let hiddenMode = safeStorage.getItem('hidden_mode') === '1';
+        let engineerMode = safeStorage.getItem('engineer_mode') === '1';
 
         // Радиус точки солнца «сейчас» и летящей точки ролика
         function altitudeToRadius(altitude) {
-            if (!hiddenMode) return HORIZON_R;
+            if (!engineerMode) return HORIZON_R;
             const r = HORIZON_R * (1 - altitude / 90);
             return Math.max(PATH_MIN_R, Math.min(PATH_MAX_R, r));
         }
 
         // Мишень в обычном режиме живёт на своей внешней орбите — так было до траектории
         function targetRadius(altitude) {
-            return hiddenMode ? altitudeToRadius(altitude) : TARGET_R;
+            return engineerMode ? altitudeToRadius(altitude) : TARGET_R;
         }
 
-        function setHiddenMode(on) {
-            hiddenMode = on;
-            safeStorage.setItem('hidden_mode', on ? '1' : '0');
+        function setEngineerMode(on) {
+            engineerMode = on;
+            safeStorage.setItem('engineer_mode', on ? '1' : '0');
             // Метка тихая: имя из вашего концепта, а не крикливое «ПРО»
             buildNumberEl.textContent = on ? `v${APP_VERSION} · SN-01` : `v${APP_VERSION}`;
             sunStatus.classList.toggle('expandable', on);
@@ -980,8 +1061,8 @@
             }
         }
 
-        function toggleHiddenMode() {
-            setHiddenMode(!hiddenMode);
+        function toggleEngineerMode() {
+            setEngineerMode(!engineerMode);
         }
 
         // Опорные точки градиента вдоль траектории (по убыванию высоты).
@@ -1044,7 +1125,7 @@
 
         function renderSunPath(now) {
             sunPathGroup.textContent = '';
-            if (!hiddenMode || !sunPathSamples.length) return;
+            if (!engineerMode || !sunPathSamples.length) return;
 
             const nowT = now.getTime();
             const COLOR_DELTA = 12; // суммарная разница RGB, после которой начинаем новый сегмент
@@ -1138,7 +1219,7 @@
         }
 
         function openZoneLegend() {
-            if (!hiddenMode || userLat === null) return;
+            if (!engineerMode || userLat === null) return;
             renderZoneLegend(new Date());
             zoneLegend.classList.add('open');
             sunStatus.classList.add('open');
@@ -1185,7 +1266,7 @@
             currentSunAltitude = pos.altitude;
 
             // Сутки семплируем только когда есть что рисовать
-            if (hiddenMode) {
+            if (engineerMode) {
                 const key = sunPathKeyFor(now, userLat, userLon);
                 if (key !== sunPathKey) {
                     sunPathKey = key;
@@ -1197,7 +1278,7 @@
             currentSunDot.style.display = 'block';
             // Глубокой ночью в скрытом режиме точка уезжает за край нарисованной траектории —
             // гасим её почти совсем, чтобы одинокий кружок не читался как ошибка
-            if (hiddenMode && pos.altitude < PATH_MIN_ALT) currentSunDot.setAttribute('opacity', '0.18');
+            if (engineerMode && pos.altitude < PATH_MIN_ALT) currentSunDot.setAttribute('opacity', '0.18');
             else if (pos.altitude <= -6) currentSunDot.setAttribute('opacity', '0.4');
             else if (pos.altitude < 0) currentSunDot.setAttribute('opacity', '0.75');
             else currentSunDot.setAttribute('opacity', '1');
@@ -1422,7 +1503,7 @@
                         // В обычном режиме летящая точка идёт по своей орбите r=115, а мишень
                         // ждёт её на внешней r=140 — как было до появления траектории.
                         // В скрытом режиме обе сходятся в одной точке дуги.
-                        const animEndR = hiddenMode ? finalR : startR;
+                        const animEndR = engineerMode ? finalR : startR;
                         let currentAz = startAz + diff * ease2;
                         setSvgDotPosition(animatingSunDot, currentAz, startR + (animEndR - startR) * ease2);
 
@@ -1488,7 +1569,7 @@
         }
 
         // ==================== Инициализация и разрешения ====================
-        if (hiddenMode) {
+        if (engineerMode) {
             buildNumberEl.textContent = `v${APP_VERSION} · SN-01`;
             sunStatus.classList.add('expandable');
         }

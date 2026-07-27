@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Витрина скинов — Солнечный компас</title>
+    <meta name="theme-color" content="#050505">
+    <script src="catalog.js"></script>
+    <style>
+        :root {
+            --bg: #050505;
+            --text-primary: #ffffff;
+            --text-secondary: rgba(255, 255, 255, 0.45);
+            --text-faint: rgba(255, 255, 255, 0.30);
+            --accent-sun: #ffd25f;
+            --surface-border: rgba(255, 255, 255, 0.10);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            background: var(--bg);
+            color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+            min-height: 100dvh;
+            padding: calc(env(safe-area-inset-top) + 26px) 18px calc(env(safe-area-inset-bottom) + 40px);
+            -webkit-font-smoothing: antialiased;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .wrap { max-width: 520px; margin: 0 auto; }
+
+        header { margin-bottom: 24px; }
+        h1 {
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 1.8px;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+        }
+        .lede {
+            margin-top: 8px;
+            font-size: 13px;
+            line-height: 1.5;
+            color: var(--text-faint);
+        }
+
+        /* Кошелёк появляется только когда магазин включён */
+        .wallet {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            margin-top: 16px;
+            font-size: 13px;
+            font-variant-numeric: tabular-nums;
+            color: var(--accent-sun);
+        }
+        body.shop-on .wallet { display: flex; }
+        .coin {
+            width: 13px; height: 13px;
+            border-radius: 50%;
+            background: var(--accent-sun);
+            box-shadow: 0 0 8px rgba(255, 210, 95, 0.5);
+        }
+
+        .group { margin-bottom: 28px; }
+        .group-title {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 1.4px;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 3px;
+        }
+        .group-note {
+            font-size: 11px;
+            color: var(--text-faint);
+            margin-bottom: 12px;
+        }
+
+        /* Витрина: две карточки в ряд, карточка вертикальная */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .card {
+            position: relative;
+            aspect-ratio: 3 / 4;
+            display: flex;
+            flex-direction: column;
+            border-radius: 14px;
+            background: #0b0b0b;
+            border: 1px solid var(--surface-border);
+            overflow: hidden;
+            text-decoration: none;
+            color: inherit;
+            transition: transform 0.15s ease;
+        }
+        .card.ready { cursor: pointer; border-color: rgba(255, 210, 95, 0.26); }
+        .card.ready:active { transform: scale(0.975); }
+        /* Макет: нарисован, но к движку не подключён */
+        .card.draft { border-style: dashed; }
+        /* Ещё не отрисованные — чёрные плашки без превью */
+        .card.planned { background: #000; border-color: rgba(255, 255, 255, 0.07); }
+
+        /* Превью — только у открытых */
+        .preview {
+            flex: 1 1 auto;
+            min-height: 0;
+            background: #000;
+            border-bottom: 1px solid var(--surface-border);
+        }
+        .preview svg { width: 100%; height: 100%; display: block; }
+
+        .card-body { flex: 0 0 auto; padding: 10px 11px 11px; overflow: hidden; }
+        /* У закрытых текст занимает всю плашку и прижат к низу */
+        .card:not(.ready) .card-body {
+            flex: 1 1 auto;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            padding: 12px;
+        }
+
+        .card-name {
+            font-size: 13px;
+            font-weight: 500;
+            line-height: 1.25;
+            letter-spacing: -0.1px;
+        }
+        .card.planned .card-name { color: rgba(255, 255, 255, 0.62); }
+        .card.draft .card-name { color: rgba(255, 255, 255, 0.78); }
+
+        .card-note {
+            margin-top: 5px;
+            font-size: 10.5px;
+            line-height: 1.4;
+            color: var(--text-faint);
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        /* Клампы подобраны так, чтобы текст не вылезал за 3:4 карточки */
+        .card.ready .card-note { -webkit-line-clamp: 2; }
+        .card:not(.ready) .card-note { -webkit-line-clamp: 3; }
+
+        .badge {
+            position: absolute;
+            top: 9px; right: 9px;
+            z-index: 2;
+            font-size: 9px;
+            font-weight: 600;
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+            padding: 3px 6px;
+            border-radius: 5px;
+        }
+        .badge.open  { color: #0a0a0a; background: var(--accent-sun); }
+        .badge.draft { color: var(--text-secondary); background: rgba(255,255,255,0.08); }
+        .badge.soon  { color: var(--text-faint); background: rgba(255,255,255,0.05); }
+
+        /* Цена показывается только при включённом магазине.
+           У неё свой класс: с классом .badge её спрятало бы правило ниже. */
+        .price {
+            display: none;
+            position: absolute;
+            top: 9px; right: 9px;
+            z-index: 2;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 7px 3px 6px;
+            border-radius: 5px;
+            background: rgba(255, 210, 95, 0.12);
+        }
+        body.shop-on .card.locked .price { display: flex; }
+        body.shop-on .card.locked .badge { display: none; }
+        .price .coin { width: 9px; height: 9px; box-shadow: none; }
+        .price span { font-size: 11px; color: var(--accent-sun); font-variant-numeric: tabular-nums; }
+
+        footer {
+            margin-top: 30px;
+            padding-top: 18px;
+            border-top: 1px solid var(--surface-border);
+            font-size: 11px;
+            line-height: 1.6;
+            color: var(--text-faint);
+        }
+        footer b { color: var(--text-secondary); font-weight: 500; }
+        .counts { margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <header>
+        <h1>Витрина скинов</h1>
+        <div class="lede">
+            Один прибор, разные обличья. Астрономия у всех одна — меняются язык,
+            звук и повадка.
+        </div>
+        <div class="wallet"><span class="coin"></span><span id="walletValue">0</span></div>
+    </header>
+
+    <div id="groups"></div>
+
+    <footer>
+        <div class="counts" id="counts"></div>
+        <b>Прототип витрины.</b> Магазин выключен: всё готовое открыто, ненарисованное показано
+        плашками. Названия наши — узнаваемая стилистика без чужих марок и имён.
+    </footer>
+</div>
+
+<script>
+    // Магазин — подключаемая опция, а не встроенная часть. Пока выключен:
+    // готовые скины открыты всем, цены не показываются, кошелька нет.
+    const SHOP_ENABLED = false;
+
+    const STATUS_LABEL = { ready: 'Открыт', draft: 'Макет', planned: 'Скоро' };
+    const STATUS_BADGE = { ready: 'open', draft: 'draft', planned: 'soon' };
+
+    const polar = (deg, r) => {
+        const a = (deg - 90) * Math.PI / 180;
+        return [(50 + r * Math.cos(a)).toFixed(1), (50 + r * Math.sin(a)).toFixed(1)];
+    };
+
+    /* Превью рисуются той же геометрией, что и сам прибор, а не скриншотами:
+       скриншот устареет на первой правке скина, а это — нет. Ключ = id скина. */
+    const PREVIEWS = {
+        base() {
+            const ticks = [0, 90, 180, 270].map(a => {
+                const [x1, y1] = polar(a, 30), [x2, y2] = polar(a, 34);
+                return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
+                              stroke="${a ? 'rgba(255,255,255,0.3)' : '#ffd25f'}" stroke-width="1.2"/>`;
+            }).join('');
+            const [sx, sy] = polar(112, 24);   // солнце сейчас
+            const [tx, ty] = polar(287, 30);   // мишень замера
+            return `<svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+                <rect width="100" height="100" fill="#050505"/>
+                <circle cx="50" cy="50" r="34" fill="none" stroke="rgba(255,255,255,0.09)" stroke-width="1"/>
+                <circle cx="50" cy="50" r="24" fill="none" stroke="rgba(255,255,255,0.14)"
+                        stroke-width="1" stroke-dasharray="1 2.6"/>
+                ${ticks}
+                <circle cx="50" cy="50" r="1.5" fill="#fff"/>
+                <circle cx="${sx}" cy="${sy}" r="2.3" fill="#fff"/>
+                <circle cx="${tx}" cy="${ty}" r="3" fill="#ffd25f"/>
+            </svg>`;
+        },
+
+        braun() {
+            // Сутки разложены на диоды — язык этого скина
+            const zones = [[220, 252, '#F4C84C', 0.95], [252, 420, '#ECECEC', 0.5],
+                           [60, 74, '#C56B3A', 0.95], [74, 104, '#4B76C8', 0.9],
+                           [104, 220, '#555555', 0.4]];
+            let leds = '';
+            for (let a = 0; a < 360; a += 6) {
+                const z = zones.find(([f, t]) => (a >= f && a < t) || (a + 360 >= f && a + 360 < t));
+                const [x, y] = polar(a, 26);
+                leds += `<circle cx="${x}" cy="${y}" r="1.5"
+                                 fill="${z ? z[2] : 'rgba(255,255,255,0.28)'}"
+                                 opacity="${z ? z[3] : 1}"/>`;
+            }
+            const [sx, sy] = polar(112, 26);
+            return `<svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+                <rect width="100" height="100" fill="#E6E3DC"/>
+                <circle cx="50" cy="50" r="38" fill="#191919"/>
+                ${leds}
+                <line x1="50" y1="50" x2="50" y2="31" stroke="#ECECEC" stroke-width="1.4" stroke-linecap="round"/>
+                <line x1="50" y1="50" x2="50" y2="67" stroke="#787878" stroke-width="1.4" stroke-linecap="round"/>
+                <circle cx="50" cy="50" r="2.6" fill="#9D9D9D"/>
+                <circle cx="50" cy="50" r="1.2" fill="#EFEFEF"/>
+                <circle cx="${sx}" cy="${sy}" r="2.6" fill="#FFFFFF"/>
+            </svg>`;
+        }
+    };
+
+    const catalog = window.SKIN_CATALOG;
+    const groupsEl = document.getElementById('groups');
+
+    document.body.classList.toggle('shop-on', SHOP_ENABLED);
+
+    for (const group of catalog.groups) {
+        const items = catalog.skins.filter(s => s.group === group.id);
+        if (!items.length) continue;
+
+        const section = document.createElement('section');
+        section.className = 'group';
+
+        const title = document.createElement('div');
+        title.className = 'group-title';
+        title.textContent = group.title;
+
+        const note = document.createElement('div');
+        note.className = 'group-note';
+        note.textContent = group.note;
+
+        const grid = document.createElement('div');
+        grid.className = 'grid';
+
+        for (const skin of items) {
+            const isReady = skin.status === 'ready';
+            // Готовый скин — ссылка, остальные — просто плашки
+            const card = document.createElement(isReady ? 'a' : 'div');
+            card.className = `card ${skin.status}`;
+            if (isReady) card.href = skin.file;
+            else if (SHOP_ENABLED) card.classList.add('locked');
+
+            const badge = document.createElement('div');
+            badge.className = `badge ${STATUS_BADGE[skin.status]}`;
+            badge.textContent = STATUS_LABEL[skin.status];
+            card.appendChild(badge);
+
+            const price = document.createElement('div');
+            price.className = 'price';
+            price.innerHTML = '<span class="coin"></span>';
+            const p = document.createElement('span');
+            p.textContent = skin.price;
+            price.appendChild(p);
+            card.appendChild(price);
+
+            // Превью только у открытых: у закрытых показывать нечего, и мы не показываем
+            if (isReady && PREVIEWS[skin.id]) {
+                const preview = document.createElement('div');
+                preview.className = 'preview';
+                preview.innerHTML = PREVIEWS[skin.id]();
+                card.appendChild(preview);
+            }
+
+            const body = document.createElement('div');
+            body.className = 'card-body';
+
+            const name = document.createElement('div');
+            name.className = 'card-name';
+            name.textContent = skin.name;
+            body.appendChild(name);
+
+            if (skin.note) {
+                const n = document.createElement('div');
+                n.className = 'card-note';
+                n.textContent = skin.note;
+                body.appendChild(n);
+            }
+
+            card.appendChild(body);
+            grid.appendChild(card);
+        }
+
+        section.append(title, note, grid);
+        groupsEl.appendChild(section);
+    }
+
+    const by = s => catalog.skins.filter(x => x.status === s).length;
+    document.getElementById('counts').textContent =
+        `${catalog.skins.length} стилей: ${by('ready')} готово, ${by('draft')} в макетах, ${by('planned')} нарисовать.`;
+</script>
+</body>
+</html>
