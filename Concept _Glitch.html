@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+    <title>CRT Solar Compass</title>
+
+    <!-- SunCalc 2.0.1 (MIT) -->
+    <script>
+        (function () {
+            'use strict';
+            var PI = Math.PI, sin = Math.sin, cos = Math.cos, tan = Math.tan, asin = Math.asin, atan2 = Math.atan2;
+            var rad = PI / 180, dayMs = 1000 * 60 * 60 * 24, J1970 = 2440588, J2000 = 2451545;
+            function toJulian(date) { return date.valueOf() / dayMs - 0.5 + J1970; }
+            function fromJulian(j) { return new Date((j + 0.5 - J1970) * dayMs); }
+            function toDays(date) { return toJulian(date) - J2000; }
+            var e = rad * 23.4397;
+            function rightAscension(l, b) { return atan2(sin(l) * cos(e) - tan(b) * sin(e), cos(l)); }
+            function declination(l, b) { return asin(sin(b) * cos(e) + cos(b) * sin(e) * sin(l)); }
+            function azimuth(H, phi, dec) { return atan2(sin(H), cos(H) * sin(phi) - tan(dec) * cos(phi)); }
+            function altitude(H, phi, dec) { return asin(sin(phi) * sin(dec) + cos(phi) * cos(dec) * cos(H)); }
+            function siderealTime(d, lw) { return rad * (280.16 + 360.9856235 * d) - lw; }
+            function astroRefraction(h) { if (h < 0) h = 0; return 0.0002967 / tan(h + 0.00312536 / (h + 0.08901179)); }
+            function solarMeanAnomaly(d) { return rad * (357.5291 + 0.98560028 * d); }
+            function eclipticLongitude(M) { var C = rad * (1.9148 * sin(M) + 0.02 * sin(2 * M) + 0.0003 * sin(3 * M)), P = rad * 102.9372; return M + C + P + PI; }
+            function sunCoords(d) { var M = solarMeanAnomaly(d), L = eclipticLongitude(M); return { dec: declination(L, 0), ra: rightAscension(L, 0) }; }
+            var SunCalc = {};
+            SunCalc.getPosition = function (date, lat, lng) {
+                var lw = rad * -lng, phi = rad * lat, d = toDays(date), c = sunCoords(d), H = siderealTime(d, lw) - c.ra;
+                return { azimuth: azimuth(H, phi, c.dec), altitude: altitude(H, phi, c.dec) };
+            };
+            var times = [[-0.833, 'sunrise', 'sunset'], [-0.3, 'sunriseEnd', 'sunsetStart'], [-6, 'dawn', 'dusk'], [-12, 'nauticalDawn', 'nauticalDusk'], [-18, 'nightEnd', 'night'], [6, 'goldenHourEnd', 'goldenHour']];
+            SunCalc.addTime = function (angle, riseName, setName) { times.push([angle, riseName, setName]); };
+            var J0 = 0.0009;
+            function julianCycle(d, lw) { return Math.round(d - J0 - lw / (2 * PI)); }
+            function approxTransit(Ht, lw, n) { return J0 + (Ht + lw) / (2 * PI) + n; }
+            function solarTransitJ(ds, M, L) { return J2000 + ds + 0.0053 * sin(M) - 0.0069 * sin(2 * L); }
+            function hourAngle(h, phi, d) { return Math.acos((sin(h) - sin(phi) * sin(d)) / (cos(phi) * cos(d))); }
+            function getSetJ(h, lw, phi, dec, n, M, L) { var w = hourAngle(h, phi, dec), a = approxTransit(w, lw, n); return solarTransitJ(a, M, L); }
+            SunCalc.getTimes = function (date, lat, lng) {
+                var lw = rad * -lng, phi = rad * lat, d = toDays(date), n = julianCycle(d, lw), ds = approxTransit(0, lw, n),
+                    M = solarMeanAnomaly(ds), L = eclipticLongitude(M), dec = declination(L, 0), Jnoon = solarTransitJ(ds, M, L),
+                    i, len, time, Jset, Jrise, result = { solarNoon: fromJulian(Jnoon), nadir: fromJulian(Jnoon - 0.5) };
+                for (i = 0, len = times.length; i < len; i += 1) {
+                    time = times[i]; Jset = getSetJ(time[0] * rad, lw, phi, dec, n, M, L); Jrise = Jnoon - (Jset - Jnoon);
+                    result[time[1]] = fromJulian(Jrise); result[time[2]] = fromJulian(Jset);
+                }
+                return result;
+            };
+            window.SunCalc = SunCalc;
+        }());
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+
+        :root {
+            /* Базовая тема (Amber) */
+            --bg: #050505;
+            --crt-color: #ffb000;
+            --text-primary: var(--crt-color);
+            --text-secondary: rgba(255, 176, 0, 0.45);
+            --accent-sun: #ffce54;
+            --accent-glow: rgba(255, 206, 84, 0.4);
+            --surface: rgba(255, 176, 0, 0.08);
+            --surface-border: rgba(255, 176, 0, 0.25);
+            
+            --compass-size: 340px;
+            --zoom-scale: 2;
+            --btn-size: 72px;
+            --font-retro: 'VT323', monospace;
+        }
+
+        /* Темы */
+        body.theme-green {
+            --crt-color: #4af626;
+            --text-secondary: rgba(74, 246, 38, 0.45);
+            --accent-sun: #8aff6b;
+            --accent-glow: rgba(138, 255, 107, 0.4);
+            --surface: rgba(74, 246, 38, 0.08);
+            --surface-border: rgba(74, 246, 38, 0.25);
+        }
+        
+        body.theme-cyan {
+            --crt-color: #00f0ff;
+            --text-secondary: rgba(0, 240, 255, 0.45);
+            --accent-sun: #8affff;
+            --accent-glow: rgba(138, 255, 255, 0.4);
+            --surface: rgba(0, 240, 255, 0.08);
+            --surface-border: rgba(0, 240, 255, 0.25);
+        }
+
+        body.theme-mono {
+            --crt-color: #e0e0e0;
+            --text-secondary: rgba(224, 224, 224, 0.45);
+            --accent-sun: #ffffff;
+            --accent-glow: rgba(255, 255, 255, 0.4);
+            --surface: rgba(224, 224, 224, 0.08);
+            --surface-border: rgba(224, 224, 224, 0.25);
+        }
+
+        /* --- GALAGA THEME --- */
+        body.theme-galaga {
+            --bg: #00000a;
+            --crt-color: #ff003c; /* Красный лазер/UI */
+            --text-primary: #ffffff; /* Белый текст */
+            --text-secondary: #00ffff; /* Циан */
+            --accent-sun: #ffff00; /* Желтый пришелец */
+            --accent-glow: rgba(255, 255, 0, 0.4);
+            --surface: rgba(0, 85, 255, 0.15);
+            --surface-border: #0055ff; /* Синие кольца компаса */
+            background-color: var(--bg);
+            background-image: 
+                radial-gradient(1.5px 1.5px at 20px 30px, #ffffff, rgba(0,0,0,0)),
+                radial-gradient(2px 2px at 150px 80px, #aaaaaa, rgba(0,0,0,0)),
+                radial-gradient(1px 1px at 300px 40px, #ffffff, rgba(0,0,0,0)),
+                radial-gradient(1.5px 1.5px at 70px 200px, #ffffff, rgba(0,0,0,0)),
+                radial-gradient(2px 2px at 280px 320px, #aaaaaa, rgba(0,0,0,0)),
+                radial-gradient(1px 1px at 110px 400px, #ffffff, rgba(0,0,0,0)),
+                radial-gradient(1.5px 1.5px at 220px 500px, #ffffff, rgba(0,0,0,0));
+            background-size: 400px 600px;
+        }
+
+        body.theme-galaga #shootLine {
+            stroke: #ff003c !important; /* Красный лазер */
+            stroke-width: 4 !important;
+            stroke-dasharray: 10 5 !important;
+        }
+
+        body.theme-galaga .compass-svg circle {
+            stroke: var(--surface-border) !important;
+        }
+
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text-primary);
+            font-family: var(--font-retro);
+            height: 100dvh;
+            width: 100vw;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            padding: calc(env(safe-area-inset-top) + 20px) 24px calc(env(safe-area-inset-bottom) + 32px);
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+            text-shadow: 0 0 5px var(--crt-color);
+            transition: background-color 0.3s;
+        }
+
+        /* --- CRT EFFECT OVERLAYS --- */
+        body::before {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 999;
+            background-size: 100% 4px, 6px 100%;
+            pointer-events: none;
+        }
+        body::after {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: radial-gradient(circle, rgba(0,0,0,0) 60%, rgba(0,0,0,0.6) 100%);
+            z-index: 1000;
+            pointer-events: none;
+        }
+
+        /* --- SCREEN CONTAINER FOR POWER OFF EFFECT --- */
+        #screen-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            transition: transform 0.1s;
+        }
+
+        .crt-off-anim { animation: crtTurnOff 0.4s cubic-bezier(0.23, 1, 0.32, 1) forwards; }
+        .crt-on-anim { animation: crtTurnOn 0.5s cubic-bezier(0.23, 1, 0.32, 1) forwards; }
+
+        @keyframes crtTurnOff {
+            0% { transform: scale(1, 1.3) translate3d(0, 0, 0); filter: brightness(1); }
+            60% { transform: scale(1, 0.001) translate3d(0, 0, 0); filter: brightness(10); }
+            100% { transform: scale(0, 0.001) translate3d(0, 0, 0); filter: brightness(0); }
+        }
+
+        @keyframes crtTurnOn {
+            0% { transform: scale(0, 0.001) translate3d(0, 0, 0); filter: brightness(0); }
+            40% { transform: scale(1, 0.001) translate3d(0, 0, 0); filter: brightness(10); }
+            100% { transform: scale(1, 1) translate3d(0, 0, 0); filter: brightness(1); }
+        }
+
+        /* --- GLITCH EFFECT --- */
+        .glitching {
+            animation: glitch-anim 0.3s cubic-bezier(.25, .46, .45, .94) both infinite;
+        }
+        @keyframes glitch-anim {
+            0% { transform: translate(0); text-shadow: 0 0 5px var(--crt-color); }
+            20% { transform: translate(-2px, 1px); text-shadow: -2px 0 red, 2px 0 blue; filter: contrast(150%); }
+            40% { transform: translate(-1px, -1px); text-shadow: 2px 0 red, -2px 0 blue; }
+            60% { transform: translate(2px, 1px); text-shadow: -2px 0 red, 2px 0 blue; filter: hue-rotate(90deg); }
+            80% { transform: translate(1px, -1px); text-shadow: 2px 0 red, -2px 0 blue; }
+            100% { transform: translate(0); text-shadow: 0 0 5px var(--crt-color); }
+        }
+
+        /* --- BOOT SCREEN --- */
+        #boot-screen {
+            position: absolute;
+            inset: 0;
+            background: var(--bg);
+            z-index: 500;
+            padding: 40px 20px;
+            font-size: 20px;
+            text-align: left;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            line-height: 1.2;
+        }
+        .hidden { display: none !important; }
+
+        /* --- RETRO UI ELEMENTS --- */
+        .top-bar { width: 100%; display: flex; justify-content: space-between; align-items: flex-start; z-index: 10; }
+
+        .retro-btn {
+            background: var(--surface);
+            border: 1px solid var(--surface-border);
+            color: var(--text-primary);
+            font-family: var(--font-retro);
+            padding: 8px 12px;
+            font-size: 16px;
+            cursor: pointer;
+            text-transform: uppercase;
+            box-shadow: 0 0 5px var(--surface-border);
+            transition: all 0.1s;
+        }
+        .retro-btn:active { background: var(--text-primary); color: #000; }
+
+        .display-header {
+            position: relative;
+            z-index: 1;
+            text-align: center;
+            margin-top: 2vh;
+            min-height: 90px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .date-label { font-size: 22px; color: var(--text-secondary); min-height: 24px; text-transform: uppercase; }
+        .clock { font-size: 80px; line-height: 1; letter-spacing: 2px; color: var(--text-primary); text-shadow: 0 0 10px var(--crt-color); }
+
+        /* --- COMPASS --- */
+        .compass-viewport {
+            position: relative;
+            z-index: 1;
+            width: var(--compass-size);
+            height: var(--compass-size);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.4s ease;
+        }
+
+        .viewport-notch {
+            position: absolute;
+            top: 0; left: 50%; transform: translateX(-50%);
+            width: 4px; height: 16px;
+            background: var(--accent-sun);
+            z-index: 5;
+            box-shadow: 0 0 10px var(--accent-sun);
+        }
+
+        .compass-svg { width: 100%; height: 100%; will-change: transform; }
+
+        .center-dot {
+            position: absolute;
+            width: 8px; height: 8px;
+            background: var(--text-primary);
+            z-index: 4;
+            box-shadow: 0 0 8px var(--text-primary);
+        }
+
+        /* Галага корабль (скрыт по умолчанию) */
+        .galaga-ship {
+            position: absolute;
+            width: 30px; height: 30px;
+            z-index: 4;
+            display: none;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .footer-meta {
+            position: relative;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+            width: 100%;
+        }
+
+        /* --- RETRO SHUTTER BUTTON --- */
+        .shutter-btn {
+            width: var(--btn-size); height: var(--btn-size);
+            border: 2px solid var(--text-primary);
+            background: transparent;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; outline: none;
+            box-shadow: inset 0 0 15px var(--surface), 0 0 10px var(--surface-border);
+        }
+        .shutter-btn:active { transform: scale(0.95); }
+        .shutter-inner {
+            width: 50px; height: 50px;
+            background: var(--surface-border);
+            border: 1px solid var(--text-primary);
+            transition: all 0.2s;
+        }
+        .shutter-btn.active { border-color: var(--accent-sun); }
+        .shutter-btn.active .shutter-inner {
+            background: var(--accent-sun);
+            box-shadow: 0 0 20px var(--accent-glow);
+            transform: scale(0.6);
+        }
+
+        .location-name { font-size: 18px; color: var(--text-secondary); text-transform: uppercase; }
+        .status-line { position: absolute; bottom: 5px; left: 24px; font-size: 14px; color: var(--text-secondary); }
+
+    </style>
+</head>
+<body>
+
+    <!-- BOOT SCREEN -->
+    <div id="boot-screen"></div>
+
+    <div id="screen-container" class="hidden">
+        
+        <!-- TOP UI -->
+        <div class="top-bar">
+            <button class="retro-btn" id="rebootBtn">SYS.REBOOT</button>
+            <button class="retro-btn" id="modeBtn">MOD: AMB</button>
+        </div>
+
+        <!-- HEADER -->
+        <div class="display-header">
+            <div class="date-label" id="dateLabel">SYS.STANDBY</div>
+            <div class="clock" id="digitalClock">00:00</div>
+        </div>
+
+        <!-- COMPASS -->
+        <div class="compass-viewport" id="compassViewport">
+            <div class="viewport-notch"></div>
+            
+            <!-- Стандартная центральная точка -->
+            <div class="center-dot" id="centerDot"></div>
+            
+            <!-- Корабль из Galaga -->
+            <div class="galaga-ship" id="galagaShip">
+                <svg width="26" height="26" viewBox="0 0 15 16" fill="var(--text-primary)">
+                    <path d="M7 0h1v2h1v1h1v1h1v2h1v2h1v3h1v1H9v1H6v-1H1v-1h1v-3h1V7h1V5h1V4h1V2H7V0z"/>
+                    <path d="M1 10h1v-1h1V8h1v3H3v1H2v1H1v-2zm12 0h-1v-1h-1V8h-1v3h1v1h1v1h1v-2z" fill="var(--crt-color)"/>
+                </svg>
+            </div>
+            
+            <svg class="compass-svg" id="compassSvg" viewBox="0 0 340 340">
+                <circle cx="170" cy="170" r="160" stroke="var(--surface-border)" stroke-width="2" fill="none"/>
+                <circle cx="170" cy="170" r="115" stroke="var(--surface-border)" stroke-width="1" stroke-dasharray="4 8" fill="none"/>
+                
+                <g id="ticksGroup"></g>
+                <g id="lettersGroup"></g>
+
+                <line id="shootLine" x1="170" y1="170" x2="170" y2="170" stroke="var(--accent-sun)" stroke-width="2" stroke-dasharray="4 4" opacity="0"/>
+                
+                <!-- Стандартные цели -->
+                <rect id="currentSunDot" x="165" y="45" width="10" height="10" fill="var(--text-primary)" style="display: none;" />
+                <rect id="targetSunDot" x="163" y="3" width="14" height="14" fill="var(--accent-sun)" style="display: none;" />
+                
+                <!-- Пришелец из Galaga -->
+                <svg id="targetAlien" x="156" y="-7" width="28" height="28" viewBox="0 0 11 8" style="display: none; fill: var(--accent-sun); overflow: visible;">
+                     <path d="M2 0h1v1H2zm6 0h1v1H8zM1 1h1v1H1zm8 0h1v1H9zM0 2h1v1H0zm10 0h1v1h-1zM0 3h11v1H0zM0 4h3v1H0zm8 0h3v1H8zM2 5h1v1H2zm5 0h1v1H7zM3 6h5v1H3z" />
+                </svg>
+            </svg>
+        </div>
+
+        <!-- FOOTER -->
+        <div class="footer-meta">
+            <button class="shutter-btn" id="calcBtn" aria-label="Сделать замер">
+                <div class="shutter-inner"></div>
+            </button>
+            <div class="location-name" id="locationLabel">LOCATING...</div>
+        </div>
+
+        <div class="status-line" id="statusLine">MEM: OK | SENSOR: STDBY</div>
+    </div>
+
+    <script>
+        // ==================== РЕТРО-ОБОЛОЧКА И СТАТУСЫ ====================
+        const bootScreen = document.getElementById('boot-screen');
+        const screenContainer = document.getElementById('screen-container');
+        const modeBtn = document.getElementById('modeBtn');
+        const rebootBtn = document.getElementById('rebootBtn');
+        const statusLine = document.getElementById('statusLine');
+        
+        const themes = [
+            { class: '', label: 'AMB' },
+            { class: 'theme-green', label: 'GRN' },
+            { class: 'theme-cyan', label: 'CYN' },
+            { class: 'theme-mono', label: 'MON' },
+            { class: 'theme-galaga', label: 'GLG' } // Новый аркадный режим
+        ];
+        let currentThemeIdx = 0;
+
+        const bootSequence = [
+            "SOLAR_OS v2.4.1 (build 8492)",
+            "Checking RAM... 640K OK",
+            "Initializing Geo-Sensors...",
+            "Loading CRT drivers...",
+            "Establishing Sat-Link...",
+            "Boot sequence complete.",
+            "Starting interface..."
+        ];
+
+        async function typeText(text, element, speed = 30) {
+            const p = document.createElement('div');
+            element.appendChild(p);
+            for (let i = 0; i < text.length; i++) {
+                p.textContent += text.charAt(i);
+                await new Promise(r => setTimeout(r, speed + Math.random() * 20));
+            }
+        }
+
+        async function runBootSequence() {
+            screenContainer.classList.add('hidden');
+            screenContainer.classList.remove('crt-on-anim', 'crt-off-anim', 'glitching');
+            bootScreen.innerHTML = '';
+            bootScreen.classList.remove('hidden');
+
+            for (let line of bootSequence) {
+                await typeText(line, bootScreen);
+                await new Promise(r => setTimeout(r, 150));
+            }
+
+            await new Promise(r => setTimeout(r, 400));
+            bootScreen.classList.add('hidden');
+            screenContainer.classList.remove('hidden');
+            screenContainer.classList.add('crt-on-anim');
+            
+            if (!isInitialized) initCompassSensors();
+        }
+
+        rebootBtn.addEventListener('click', () => {
+            screenContainer.classList.remove('crt-on-anim');
+            screenContainer.classList.add('crt-off-anim');
+            statusLine.textContent = 'SYS.REBOOT INITIATED';
+            setTimeout(() => { runBootSequence(); }, 600);
+        });
+
+        // Элементы Galaga
+        const centerDot = document.getElementById('centerDot');
+        const galagaShip = document.getElementById('galagaShip');
+        const targetAlien = document.getElementById('targetAlien');
+        const targetSunDot = document.getElementById('targetSunDot');
+        const currentSunDot = document.getElementById('currentSunDot');
+
+        modeBtn.addEventListener('click', () => {
+            currentThemeIdx = (currentThemeIdx + 1) % themes.length;
+            
+            screenContainer.classList.add('glitching');
+            statusLine.textContent = `SWITCHING TO ${themes[currentThemeIdx].label}...`;
+            
+            setTimeout(() => {
+                document.body.className = themes[currentThemeIdx].class;
+                modeBtn.textContent = `MOD: ${themes[currentThemeIdx].label}`;
+                screenContainer.classList.remove('glitching');
+                statusLine.textContent = 'MEM: OK | SENSOR: ACTIVE';
+
+                // Логика переключения UI для Galaga
+                if (themes[currentThemeIdx].class === 'theme-galaga') {
+                    centerDot.style.display = 'none';
+                    galagaShip.style.display = 'flex';
+                    if (appState === 'locked') {
+                        targetSunDot.style.display = 'none';
+                        targetAlien.style.display = 'block';
+                    }
+                } else {
+                    centerDot.style.display = 'block';
+                    galagaShip.style.display = 'none';
+                    if (appState === 'locked') {
+                        targetSunDot.style.display = 'block';
+                        targetAlien.style.display = 'none';
+                    }
+                }
+            }, 300);
+        });
+
+        window.onload = runBootSequence;
+
+        // ==================== ЛОГИКА КОМПАСА ====================
+        const cx = 170, cy = 170;
+        const ticksGroup = document.getElementById('ticksGroup');
+        const lettersGroup = document.getElementById('lettersGroup');
+
+        for (let i = 0; i < 360; i += 5) {
+            const isMajor = i % 30 === 0;
+            const isMedium = i % 10 === 0;
+            const r1 = 160;
+            const r2 = isMajor ? 145 : (isMedium ? 150 : 155);
+            const rad = (i - 90) * Math.PI / 180;
+            
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('x1', cx + r1 * Math.cos(rad));
+            line.setAttribute('y1', cy + r1 * Math.sin(rad));
+            line.setAttribute('x2', cx + r2 * Math.cos(rad));
+            line.setAttribute('y2', cy + r2 * Math.sin(rad));
+            line.setAttribute('stroke', 'var(--surface-border)');
+            line.setAttribute('stroke-width', isMajor ? '2' : '1');
+            ticksGroup.appendChild(line);
+        }
+
+        const directions = [
+            { label: 'N', angle: 0 }, { label: 'E', angle: 90 },
+            { label: 'S', angle: 180 }, { label: 'W', angle: 270 }
+        ];
+
+        directions.forEach(dir => {
+            const rad = (dir.angle - 90) * Math.PI / 180;
+            const x = cx + 130 * Math.cos(rad);
+            const y = cy + 130 * Math.sin(rad);
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('x', x); text.setAttribute('y', y);
+            text.setAttribute('fill', dir.angle === 0 ? 'var(--accent-sun)' : 'var(--text-primary)');
+            text.setAttribute('font-size', '20');
+            text.setAttribute('text-anchor', 'middle');
+            text.setAttribute('dominant-baseline', 'central');
+            text.setAttribute('transform', `rotate(${dir.angle}, ${x}, ${y})`);
+            text.textContent = dir.label;
+            lettersGroup.appendChild(text);
+        });
+
+        const digitalClock = document.getElementById('digitalClock');
+        const compassSvg = document.getElementById('compassSvg');
+        const dateLabel = document.getElementById('dateLabel');
+        const calcBtn = document.getElementById('calcBtn');
+        const locationLabel = document.getElementById('locationLabel');
+        const shootLine = document.getElementById('shootLine');
+
+        let userLat = null, userLon = null;
+        let realHeading = 0, visualHeading = 0;
+        let appState = 'ready';
+        let isInitialized = false;
+
+        function updateClock() {
+            const now = new Date();
+            const hs = String(now.getHours()).padStart(2, '0');
+            const ms = String(now.getMinutes()).padStart(2, '0');
+            const sep = now.getSeconds() % 2 === 0 ? ':' : ' ';
+            if(appState !== 'calculating') digitalClock.textContent = `${hs}${sep}${ms}`;
+            setTimeout(updateClock, 1000);
+        }
+        updateClock();
+
+        function normalizeAngle(angle) { return ((angle % 360) + 360) % 360; }
+        function smoothAngle(target, current) {
+            let diff = target - current;
+            while (diff > 180) diff -= 360;
+            while (diff < -180) diff += 360;
+            return current + diff * 0.15;
+        }
+
+        function renderCompass() {
+            visualHeading = smoothAngle(realHeading, visualHeading);
+            compassSvg.style.transform = `rotate(${-visualHeading}deg)`;
+            requestAnimationFrame(renderCompass);
+        }
+
+        function handleOrientation(e) {
+            let heading = e.webkitCompassHeading || (e.alpha !== null ? 360 - e.alpha : null);
+            if (heading !== null && appState !== 'locked') realHeading = normalizeAngle(heading);
+        }
+
+        async function initCompassSensors() {
+            isInitialized = true;
+            statusLine.textContent = 'REQ SENSOR PERMISSION...';
+            
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                try {
+                    const state = await DeviceOrientationEvent.requestPermission();
+                    if (state === 'granted') window.addEventListener('deviceorientation', handleOrientation, true);
+                } catch (e) {
+                    statusLine.textContent = 'SENSOR ERROR';
+                }
+            } else {
+                window.addEventListener('deviceorientation', handleOrientation, true);
+            }
+
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    pos => {
+                        userLat = pos.coords.latitude; userLon = pos.coords.longitude;
+                        locationLabel.textContent = `${userLat.toFixed(2)}N ${userLon.toFixed(2)}E`;
+                        statusLine.textContent = 'GPS LOCK: OK';
+                        updateSun();
+                    },
+                    err => {
+                        userLat = 55.75; userLon = 37.61;
+                        locationLabel.textContent = 'MSK_DEMO';
+                        statusLine.textContent = 'GPS LOCK: FAILED (DEMO)';
+                        updateSun();
+                    }
+                );
+            }
+            renderCompass();
+        }
+
+        function setRectPos(el, az, radius, width, height) {
+            const rad = (az - 90) * Math.PI / 180;
+            el.setAttribute('x', cx + radius * Math.cos(rad) - width/2);
+            el.setAttribute('y', cy + radius * Math.sin(rad) - height/2);
+        }
+
+        function updateSun() {
+            if (!userLat) return;
+            const pos = window.SunCalc.getPosition(new Date(), userLat, userLon);
+            const az = (pos.azimuth * 180 / Math.PI + 180) % 360;
+            currentSunDot.style.display = 'block';
+            setRectPos(currentSunDot, az, 115, 10, 10);
+        }
+
+        let glitchInt;
+        function startCalculatingGlitch() {
+            glitchInt = setInterval(() => {
+                const r1 = Math.floor(Math.random()*10);
+                const r2 = Math.floor(Math.random()*10);
+                digitalClock.textContent = `0${r1}:0${r2}`;
+            }, 50);
+        }
+
+        calcBtn.addEventListener('click', () => {
+            if (appState === 'calculating') return;
+            
+            if (appState === 'locked') {
+                appState = 'ready';
+                calcBtn.classList.remove('active');
+                targetSunDot.style.display = 'none';
+                targetAlien.style.display = 'none';
+                shootLine.setAttribute('opacity', '0');
+                dateLabel.textContent = 'SYS.STANDBY';
+                statusLine.textContent = 'SENSOR: ACTIVE';
+                return;
+            }
+
+            appState = 'calculating';
+            statusLine.textContent = 'CALCULATING TRAJECTORY...';
+            dateLabel.textContent = 'SCANNING...';
+            startCalculatingGlitch();
+            
+            setTimeout(() => {
+                clearInterval(glitchInt);
+                appState = 'locked';
+                calcBtn.classList.add('active');
+                
+                const targetAz = normalizeAngle(realHeading);
+                dateLabel.textContent = 'TARGET LOCKED';
+                statusLine.textContent = `AZIMUTH: ${Math.round(targetAz)}°`;
+                digitalClock.textContent = "18:42"; 
+                
+                // Отображение пришельца в режиме Galaga, или точки в других
+                if (themes[currentThemeIdx].class === 'theme-galaga') {
+                    targetAlien.style.display = 'block';
+                    setRectPos(targetAlien, targetAz, 140, 28, 28);
+                } else {
+                    targetSunDot.style.display = 'block';
+                    setRectPos(targetSunDot, targetAz, 140, 14, 14);
+                }
+                
+                const rad = (targetAz - 90) * Math.PI / 180;
+                shootLine.setAttribute('x2', cx + 140 * Math.cos(rad));
+                shootLine.setAttribute('y2', cy + 140 * Math.sin(rad));
+                shootLine.setAttribute('opacity', '1');
+                
+                screenContainer.classList.add('glitching');
+                setTimeout(() => screenContainer.classList.remove('glitching'), 300);
+                
+            }, 1500);
+        });
+    </script>
+</body>
+</html>
