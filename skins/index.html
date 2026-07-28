@@ -101,6 +101,14 @@
         }
         .card.ready { cursor: pointer; border-color: rgba(255, 210, 95, 0.26); }
         .card.ready:active { transform: scale(0.975); }
+
+        /* Закрытая карточка отвечает на касание — иначе тап в пустоту читается как поломка */
+        .card.nudge { animation: cardNudge 0.32s ease; }
+        @keyframes cardNudge {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-3px); }
+            60% { transform: translateX(3px); }
+        }
         /* Макет: нарисован, но к движку не подключён */
         .card.draft { border-style: dashed; }
         /* Ещё не отрисованные — чёрные плашки без превью */
@@ -339,7 +347,29 @@
     const catalog = window.SKIN_CATALOG;
     const groupsEl = document.getElementById('groups');
 
+    const store = (() => {
+        try {
+            localStorage.setItem('__t__', '1'); localStorage.removeItem('__t__');
+            return localStorage;
+        } catch (e) {
+            return { getItem: () => null, setItem: () => {} };
+        }
+    })();
+
     document.body.classList.toggle('shop-on', SHOP_ENABLED);
+
+    /* Витрина закрывается выбором скина — кнопки «назад» у неё нет и не должно быть.
+       Приложение передаёт свой путь в ?from=, чтобы карточка «Прибор» вернула
+       в ту же сборку, из которой пришли, а не в ту, что лежит в корне.
+
+       Берём только собственный путь на этом же домене: `//evil.tld` и абсолютные
+       ссылки отбрасываем, иначе получится открытый редирект. */
+    const returnPath = (() => {
+        const raw = new URLSearchParams(location.search).get('from');
+        if (!raw) return null;
+        if (!raw.startsWith('/') || raw.startsWith('//')) return null;
+        return raw;
+    })();
 
     for (const group of catalog.groups) {
         const items = catalog.skins.filter(s => s.group === group.id);
@@ -364,8 +394,20 @@
             // Готовый скин — ссылка, остальные — просто плашки
             const card = document.createElement(isReady ? 'a' : 'div');
             card.className = `card ${skin.status}`;
-            if (isReady) card.href = skin.file;
-            else if (SHOP_ENABLED) card.classList.add('locked');
+            if (isReady) {
+                // База возвращает туда, откуда пришли; остальные ведут в свой файл
+                card.href = (skin.id === 'base' && returnPath) ? returnPath : skin.file;
+                // Выбор запоминаем: витрина — это выбор скина, а не разовый переход
+                card.addEventListener('click', () => store.setItem('active_skin', skin.id));
+            } else {
+                if (SHOP_ENABLED) card.classList.add('locked');
+                // Закрытая карточка должна отвечать на касание, иначе читается как поломка
+                card.addEventListener('click', () => {
+                    card.classList.remove('nudge');
+                    void card.offsetWidth;
+                    card.classList.add('nudge');
+                });
+            }
 
             const badge = document.createElement('div');
             badge.className = `badge ${STATUS_BADGE[skin.status]}`;
@@ -425,15 +467,6 @@
        ссылке, не ломая прибор. */
     const bootEl = document.getElementById('boot');
     const wrapEl = document.querySelector('.wrap');
-
-    const store = (() => {
-        try {
-            localStorage.setItem('__t__', '1'); localStorage.removeItem('__t__');
-            return localStorage;
-        } catch (e) {
-            return { getItem: () => null, setItem: () => {} };
-        }
-    })();
 
     const BOOT_LINES = [
         { text: 'SOLAR_OS v2.4.1 (build 8492)' },

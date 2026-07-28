@@ -27,7 +27,7 @@ window.SKIN_CATALOG = {
     skins: [
         // ── Терминалы ───────────────────────────────────────────────────────
         { id: 'base',      group: 'terminals',   status: 'ready',   price: 0,  file: '../index.html',
-          name: 'Прибор',            note: 'Базовый тёмный. Всегда бесплатный' },
+          name: 'Прибор',            note: 'Базовый тёмный. Всегда открыт — им же закрывается витрина' },
         { id: 'amber',     group: 'terminals',   status: 'draft',   price: 4,
           name: 'Янтарь',            note: 'Кинескоп, тёплое свечение, гул трансформатора' },
         { id: 'green',     group: 'terminals',   status: 'draft',   price: 4,
