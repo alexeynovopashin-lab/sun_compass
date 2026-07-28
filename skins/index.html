@@ -191,9 +191,69 @@
         }
         footer b { color: var(--text-secondary); font-weight: 500; }
         .counts { margin-bottom: 10px; }
+
+        /* ===== Первая загрузка витрины: система поднимается после сбоя =====
+           Ровно один раз, дальше витрина открывается сразу. Флаг `shop_booted`.
+           Шрифт — системный моноширинный: подключать VT323 с Google Fonts значит
+           поставить мгновенную загрузку в зависимость от чужого сервера. */
+        #boot {
+            position: fixed;
+            inset: 0;
+            z-index: 900;
+            background: #050505;
+            color: #ffb000;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 14px;
+            line-height: 1.55;
+            letter-spacing: 0.3px;
+            text-shadow: 0 0 6px rgba(255, 176, 0, 0.55);
+            padding: calc(env(safe-area-inset-top) + 34px) 22px 22px;
+            overflow: hidden;
+        }
+        #boot.gone { display: none; }
+
+        /* Развёртка кинескопа */
+        #boot::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background: linear-gradient(rgba(0,0,0,0) 50%, rgba(0,0,0,0.28) 50%);
+            background-size: 100% 4px;
+        }
+        #boot::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background: radial-gradient(circle, rgba(0,0,0,0) 58%, rgba(0,0,0,0.65) 100%);
+        }
+        .boot-line { white-space: pre-wrap; word-break: break-word; }
+        .boot-line.fault { color: #ff5a3c; text-shadow: 0 0 6px rgba(255, 90, 60, 0.6); }
+        .boot-caret::after {
+            content: "_";
+            animation: caretBlink 0.9s steps(1) infinite;
+        }
+        @keyframes caretBlink { 50% { opacity: 0; } }
+
+        /* Кинескоп разворачивается в витрину */
+        .wrap.crt-on { animation: crtTurnOn 0.5s cubic-bezier(0.23, 1, 0.32, 1) both; }
+        @keyframes crtTurnOn {
+            0%   { transform: scale(1, 0.004); filter: brightness(8); opacity: 1; }
+            45%  { transform: scale(1, 0.004); filter: brightness(8); }
+            100% { transform: scale(1, 1); filter: brightness(1); }
+        }
+
+        /* Кому анимация мешает — тому сразу витрина */
+        @media (prefers-reduced-motion: reduce) {
+            #boot { display: none; }
+            .wrap.crt-on { animation: none; }
+        }
     </style>
 </head>
 <body>
+<div id="boot" class="gone" aria-hidden="true"></div>
+
 <div class="wrap">
     <header>
         <h1>Витрина скинов</h1>
@@ -354,6 +414,84 @@
     const by = s => catalog.skins.filter(x => x.status === s).length;
     document.getElementById('counts').textContent =
         `${catalog.skins.length} стилей: ${by('ready')} готово, ${by('draft')} в макетах, ${by('planned')} нарисовать.`;
+
+    /* ==================== Первая загрузка витрины ====================
+       Прибор сломался — значит то, что грузится после него, должно грузиться
+       как система. Ровно один раз: дальше витрина открывается сразу.
+
+       Хранилище то же, что у приложения: origin один, ключи не пересекаются.
+       `skins_seen` — приложение уже показало поломку, `shop_booted` — витрина
+       уже поднималась. Флаги раздельные: на витрину можно прийти и по прямой
+       ссылке, не ломая прибор. */
+    const bootEl = document.getElementById('boot');
+    const wrapEl = document.querySelector('.wrap');
+
+    const store = (() => {
+        try {
+            localStorage.setItem('__t__', '1'); localStorage.removeItem('__t__');
+            return localStorage;
+        } catch (e) {
+            return { getItem: () => null, setItem: () => {} };
+        }
+    })();
+
+    const BOOT_LINES = [
+        { text: 'SOLAR_OS v2.4.1 (build 8492)' },
+        { text: 'RAM 640K ... OK' },
+        { text: 'INSTRUMENT FAULT — RECOVERING', fault: true },
+        // Число берём из каталога: зашитое здесь соврёт на первом же новом скине
+        { text: `Mounting skin catalog ... ${catalog.skins.length} entries` },
+        { text: 'Restoring interface drivers ...' },
+        { text: 'Boot sequence complete.' }
+    ];
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    function typeLine({ text, fault }, speed, signal) {
+        return new Promise(resolve => {
+            const line = document.createElement('div');
+            line.className = 'boot-line boot-caret' + (fault ? ' fault' : '');
+            bootEl.appendChild(line);
+            let i = 0;
+            const step = () => {
+                if (signal.skipped) { line.textContent = text; line.classList.remove('boot-caret'); return resolve(); }
+                line.textContent = text.slice(0, ++i);
+                if (i >= text.length) { line.classList.remove('boot-caret'); return resolve(); }
+                // Неровный ритм: ровная машинопись читается как анимация, а не как машина
+                setTimeout(step, speed + Math.random() * speed);
+            };
+            step();
+        });
+    }
+
+    async function runBoot() {
+        bootEl.classList.remove('gone');
+        bootEl.setAttribute('aria-hidden', 'false');
+        wrapEl.style.visibility = 'hidden';
+
+        // Тап в любом месте досматривать не заставляет
+        const signal = { skipped: false };
+        const skip = () => { signal.skipped = true; };
+        bootEl.addEventListener('click', skip);
+
+        // ~3 секунды на всю последовательность: дольше — и это уже не ритуал, а ожидание
+        for (const line of BOOT_LINES) {
+            await typeLine(line, 9, signal);
+            if (!signal.skipped) await new Promise(r => setTimeout(r, 80));
+        }
+        await new Promise(r => setTimeout(r, signal.skipped ? 120 : 380));
+
+        bootEl.removeEventListener('click', skip);
+        bootEl.classList.add('gone');
+        bootEl.setAttribute('aria-hidden', 'true');
+        wrapEl.style.visibility = '';
+        wrapEl.classList.add('crt-on');
+    }
+
+    if (store.getItem('shop_booted') !== '1' && !reducedMotion) {
+        store.setItem('shop_booted', '1');
+        runBoot();
+    }
 </script>
 </body>
 </html>
