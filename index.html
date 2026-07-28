@@ -934,12 +934,19 @@
         const SKINS_URL = 'skins/';
         let isRebooting = false;
 
+        // Витрина закрывается выбором скина, отдельной кнопки «назад» у неё нет.
+        // Поэтому говорим ей, откуда пришли: карточка «Прибор» вернёт в эту же сборку,
+        // а не в ту, что лежит в корне.
+        function skinsHref() {
+            return `${SKINS_URL}?from=${encodeURIComponent(location.pathname)}`;
+        }
+
         // Первый раз прибор «ломается» и перезагружается — так пятый тап читается
         // как найденная поломка, а не как пункт меню. Дальше открывается сразу.
         function openSkins() {
             if (isRebooting) return;
             if (safeStorage.getItem('skins_seen') === '1') {
-                location.href = SKINS_URL;
+                location.href = skinsHref();
                 return;
             }
             safeStorage.setItem('skins_seen', '1');
@@ -953,7 +960,7 @@
 
             setTimeout(() => {
                 glitchOverlay.classList.add('on');
-                setTimeout(() => { location.href = SKINS_URL; }, 640);
+                setTimeout(() => { location.href = skinsHref(); }, 640);
             }, 1250);
         }
 
